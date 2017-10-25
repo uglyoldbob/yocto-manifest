@@ -3,6 +3,7 @@
   <!-- You can have as many remote repositories as you like -->
   <remote fetch="git://github.com/bmwcarit" name="bmwcarit"/>
   <remote fetch="git://github.com/gumstix" name="gumstix"/>
+  <remote fetch="git://github.com/uglyoldbob" name="uglyoldbob"/>
   <remote fetch="git://git.openembedded.org" name="oe"/>
   <remote fetch="git://git.yoctoproject.org" name="yocto"/>
   <remote fetch="git://github.com/meta-qt5" name="qt5"/>
@@ -13,6 +14,7 @@
        "remote": the remote host from above (if not the default)
        "revision": commitish to checkout (if not the default)
        "path": directory where git repository gets cloned/synced -->
+  <project name="custom" path="poky/custom" remote="uglyoldbob" revision="refs/heads/master"/>
   <project name="meta-gumstix" path="poky/meta-gumstix" revision="refs/heads/fido" upstream="refs/heads/fido"/>
   <project name="meta-gumstix-extras" path="poky/meta-gumstix-extras" revision="refs/heads/fido" upstream="refs/heads/fido"/>
   <project name="meta-java" path="poky/meta-java" remote="yocto" revision="33ddb28a6428b02ddcc82d1954ecf27cd426fbb5" upstream="refs/heads/master"/>

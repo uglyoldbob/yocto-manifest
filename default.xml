@@ -17,7 +17,7 @@
        "path": directory where git repository gets cloned/synced  -->
 
   <project name="poky" revision="c9f0a99050ec0050f0dbcd55d0cd2ab18848113f" remote="yocto" />
-  <project name="custom" revision=refs/heads/master" remote="uglyoldbob" path="poky/custom" />
+  <project name="custom" revision="refs/heads/master" remote="uglyoldbob" path="poky/custom" />
   <project name="meta-openembedded" revision="902964a4da26e46018d2a8d17dcdda1ac4627a39"  remote="oe" path="poky/meta-openembedded" />
   <project name="meta-gumstix" revision="refs/heads/fido"  remote="uglyoldbob" path="poky/meta-gumstix" />
   <project name="meta-gumstix-extras" revision="refs/heads/fido" remote="gumstix" path="poky/meta-gumstix-extras" />

@@ -1,0 +1,93 @@
+>From c53d2dd9dc3bf3fc884a69f49d228839e70f1105 Mon Sep 17 00:00:00 2001
+From: Fred <fred@rogue-research.com>
+Date: Thu, 14 Jul 2016 09:16:12 -0400
+Subject: [PATCH] update device tree for touch lcd43 on chesnut
+
+---
+ arch/arm/boot/dts/omap3-overo-common-lcd43.dtsi  | 58 ++++++++++++------------
+ arch/arm/boot/dts/omap3-overo-common-lcd43c.dtsi |  6 +--
+ 2 files changed, 32 insertions(+), 32 deletions(-)
+
+diff --git a/arch/arm/boot/dts/omap3-overo-common-lcd43.dtsi b/arch/arm/boot/dts/omap3-overo-common-lcd43.dtsi
+index 65dc39c..b3340b5 100644
+--- a/arch/arm/boot/dts/omap3-overo-common-lcd43.dtsi
++++ b/arch/arm/boot/dts/omap3-overo-common-lcd43.dtsi
+@@ -147,33 +147,33 @@
+ 	};
+ };
+ 
+-//&mcspi1 {
+-//	pinctrl-names = "default";
+-//	pinctrl-0 = <&mcspi1_pins>;
+-//
+-//	/* touch controller */
+-//	ads7846@0 {
+-//		pinctrl-names = "default";
+-//		pinctrl-0 = <&ads7846_pins>;
+-//
+-//		compatible = "ti,ads7846";
+-//		vcc-supply = <&ads7846reg>;
+-//
+-//		reg = <0>;				/* CS0 */
+-//		spi-max-frequency = <1500000>;
+-//
+-//		interrupt-parent = <&gpio4>;
+-//		interrupts = <18 0>;			/* gpio_114 */
+-//		pendown-gpio = <&gpio4 18 0>;
+-//
+-//		ti,x-min = /bits/ 16 <0x0>;
+-//		ti,x-max = /bits/ 16 <0x0fff>;
+-//		ti,y-min = /bits/ 16 <0x0>;
+-//		ti,y-max = /bits/ 16 <0x0fff>;
+-//		ti,x-plate-ohms = /bits/ 16 <180>;
+-//		ti,pressure-max = /bits/ 16 <255>;
+-//
+-//		linux,wakeup;
+-//	};
+-//};
++&mcspi1 {
++	pinctrl-names = "default";
++	pinctrl-0 = <&mcspi1_pins>;
++
++	/* touch controller */
++	ads7846@0 {
++		pinctrl-names = "default";
++		pinctrl-0 = <&ads7846_pins>;
++
++		compatible = "ti,ads7846";
++		vcc-supply = <&ads7846reg>;
++
++		reg = <0>;				/* CS0 */
++		spi-max-frequency = <1500000>;
++
++		interrupt-parent = <&gpio4>;
++		interrupts = <18 0>;			/* gpio_114 */
++		pendown-gpio = <&gpio4 18 0>;
++
++		ti,x-min = /bits/ 16 <0x0>;
++		ti,x-max = /bits/ 16 <0x0fff>;
++		ti,y-min = /bits/ 16 <0x0>;
++		ti,y-max = /bits/ 16 <0x0fff>;
++		ti,x-plate-ohms = /bits/ 16 <180>;
++		ti,pressure-max = /bits/ 16 <255>;
++
++		linux,wakeup;
++	};
++};
+ 
+diff --git a/arch/arm/boot/dts/omap3-overo-common-lcd43c.dtsi b/arch/arm/boot/dts/omap3-overo-common-lcd43c.dtsi
+index 89d7dbb..c862596 100644
+--- a/arch/arm/boot/dts/omap3-overo-common-lcd43c.dtsi
++++ b/arch/arm/boot/dts/omap3-overo-common-lcd43c.dtsi
+@@ -13,6 +13,6 @@
+ 
+ #include "omap3-overo-common-lcd43.dtsi"
+ 
+-&ads7846reg {
+-	status = "disabled";
+-};
++//&ads7846reg {
++//	status = "disabled";
++//};
+-- 
+2.9.1

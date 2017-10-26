@@ -1,0 +1,56 @@
+From 7a3d88234f1ad631364902ec0c97d307e4e289da Mon Sep 17 00:00:00 2001
+From: Thomas Epperson <tepperson@briskheat.com>
+Date: Mon, 23 Oct 2017 13:09:50 -0400
+Subject: [PATCH] Add exra address for expansion board detection
+
+---
+ board/overo/overo.c | 21 ++++++++++++++++++---
+ 1 file changed, 18 insertions(+), 3 deletions(-)
+
+diff --git a/board/overo/overo.c b/board/overo/overo.c
+index 3c4c615..b72eb2a 100644
+--- a/board/overo/overo.c
++++ b/board/overo/overo.c
+@@ -37,6 +37,7 @@ DECLARE_GLOBAL_DATA_PTR;
+ #define TWL4030_I2C_BUS			0
+ #define EXPANSION_EEPROM_I2C_BUS	2
+ #define EXPANSION_EEPROM_I2C_ADDRESS	0x51
++#define EXPANSION_EEPROM_I2C_ADDRESS2	0x50
+ 
+ #define GUMSTIX_EMPTY_EEPROM		0x0
+ 
+@@ -125,14 +126,28 @@ unsigned int get_expansion_id(void)
+ 
+ 	i2c_set_bus_num(EXPANSION_EEPROM_I2C_BUS);
+ 
++	printf("Probing for expansion board with two addresses\n");
++	int which = 0;
+ 	/* return GUMSTIX_NO_EEPROM if eeprom doesn't respond */
+ 	if (i2c_probe(EXPANSION_EEPROM_I2C_ADDRESS) == 1) {
+-		i2c_set_bus_num(TWL4030_I2C_BUS);
+-		return GUMSTIX_NO_EEPROM;
++		if (i2c_probe(EXPANSION_EEPROM_I2C_ADDRESS2) == 1) {
++			i2c_set_bus_num(TWL4030_I2C_BUS);
++			return GUMSTIX_NO_EEPROM;
++		}
++		else
++		{
++			printf("Using secondary eeprom address\n");
++			which = EXPANSION_EEPROM_I2C_ADDRESS2;
++		}
++	}
++	else
++	{
++		printf("Using regular eeprom address\n");
++		which = EXPANSION_EEPROM_I2C_ADDRESS;
+ 	}
+ 
+ 	/* read configuration data */
+-	i2c_read(EXPANSION_EEPROM_I2C_ADDRESS, 0, 1, (u8 *)&expansion_config,
++	i2c_read(which, 0, 1, (u8 *)&expansion_config,
+ 		 sizeof(expansion_config));
+ 
+ 	i2c_set_bus_num(TWL4030_I2C_BUS);
+-- 
+1.9.1
+

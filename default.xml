@@ -3,7 +3,7 @@
   <!-- You can have as many remote repositories as you like -->
   <remote fetch="git://github.com/bmwcarit" name="bmwcarit"/>
   <remote fetch="git://github.com/gumstix" name="gumstix"/>
-  <remote fetch="git://github.com/uglyoldbob" name="uglyoldbob"/>
+  <remote fetch="git@github.com:uglyoldbob" name="uglyoldbob"/>
   <remote fetch="git://git.openembedded.org" name="oe"/>
   <remote fetch="git://git.yoctoproject.org" name="yocto"/>
   <remote fetch="git://github.com/meta-qt5" name="qt5"/>

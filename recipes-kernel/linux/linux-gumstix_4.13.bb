@@ -7,6 +7,10 @@ RDEPENDS_kernel-base += "kernel-devicetree"
 
 KERNEL_DEVICETREE_overo = "omap3-overo-chestnut43.dtb"
 
+# Auto-load a serial+ethernet connection on a USB OTG/peripheral
+# port if available
+KERNEL_MODULE_AUTOLOAD += "g_cdc"
+
 LINUX_VERSION = "4.13"
 LINUX_VERSION_EXTENSION = "-custom"
 

@@ -1,0 +1,24 @@
+# /etc/modules: kernel modules to load at boot time.
+#
+# This file should contain the names of kernel modules that are
+# to be loaded at boot time, one per line.  Comments begin with
+# a "#", and everything on the line after them are ignored.
+
+# Networking
+forcedeth
+ipv6
+mii
+
+# Graphics
+agpgart
+
+# USB
+ohci-hcd
+xpad
+usbmouse
+usbkbd
+
+# Sound
+snd-intel8x0 xbox=1
+
+

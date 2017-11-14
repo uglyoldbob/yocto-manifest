@@ -1,6 +1,6 @@
 require recipes-kernel/linux/linux-yocto.inc
 
-COMPATIBLE_MACHINE = "overo"
+COMPATIBLE_MACHINE = "overoa;lsjdkfklahjdklf"
 
 # Pull in the devicetree files into the rootfs
 RDEPENDS_kernel-base += "kernel-devicetree"
@@ -22,7 +22,8 @@ S = "${WORKDIR}/git"
 
 # v4.13.y = 5f1d25a9a8c999ddb1a18a6b167f1284a46e4dd1
 SRCREV = "5f1d25a9a8c999ddb1a18a6b167f1284a46e4dd1"
-SRC_URI = " \
+
+SRC_URI = " \   
     git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git;nocheckout=1;branch=linux-4.13.y \
     file://defconfig \
     file://${BOOT_SPLASH} \

@@ -1,4 +1,4 @@
-From ea379ed780165c253f06ee16f81d3fa30dc5fdab Mon Sep 17 00:00:00 2001
+From f16ca69c1c2635fc85f8301ab7b0c5d3c21b4773 Mon Sep 17 00:00:00 2001
 From: Thomas Epperson <thomas.epperson@gmail.com>
 Date: Fri, 1 Dec 2017 20:46:07 -0500
 Subject: [PATCH] Fixups to allow compiling with recent gcc obj/image-crom.elf
@@ -6,9 +6,12 @@ Subject: [PATCH] Fixups to allow compiling with recent gcc obj/image-crom.elf
 
 Signed-off-by: Thomas Epperson <thomas.epperson@gmail.com>
 ---
- Makefile                              | 23 +++++++++--------------
+ Makefile                              | 15 +++++----------
  boot/BootResetAction.c                |  5 +++++
+ boot/LoadLinux.c                      |  7 +++++--
+ boot_rom/2bBootLibrary.c              |  2 +-
  boot_rom/2bBootStartBios.c            |  2 ++
+ boot_rom/2bload.h                     |  3 ++-
  boot_rom/bootrom.ld                   |  2 ++
  drivers/ide/BootIde.c                 |  2 ++
  drivers/pci/BootInterrupts.c          |  2 +-
@@ -18,10 +21,14 @@ Signed-off-by: Thomas Epperson <thomas.epperson@gmail.com>
  drivers/video/BootVgaInitialization.c |  9 +++++++++
  drivers/video/BootVideoHelpers.c      |  2 ++
  drivers/video/focus.c                 |  2 ++
+ etherboot/arch/i386/core/xbox.c       |  5 +++++
  fs/cdrom/iso9660.c                    |  2 +-
  fs/fatx/BootFATX.c                    |  2 +-
- fs/grub/char_io.c                     |  1 +
+ fs/grub/char_io.c                     |  6 +++---
  fs/grub/fsys_ufs2.c                   |  2 ++
+ include/boot.h                        |  1 +
+ include/stdint.h                      | 25 ++++++-------------------
+ lib/crypt/sha1.h                      |  2 +-
  lib/eeprom/BootEEPROM.c               |  2 ++
  lib/misc/BootParser.c                 |  3 +++
  lib/misc/LED.c                        |  3 +++
@@ -42,10 +49,10 @@ Signed-off-by: Thomas Epperson <thomas.epperson@gmail.com>
  scripts/ldscript-crom.ld              |  2 ++
  setcygwinenv                          |  6 +++---
  tools/Makefile                        |  2 --
- 36 files changed, 102 insertions(+), 27 deletions(-)
+ 43 files changed, 121 insertions(+), 50 deletions(-)
 
 diff --git a/Makefile b/Makefile
-index 80ec92b..38ec3b0 100644
+index 80ec92b..9ff2e44 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -1,9 +1,9 @@
@@ -66,7 +73,7 @@ index 80ec92b..38ec3b0 100644
  
  #You can override these if you wish.
 -CFLAGS= -O2 -g -march=pentium -Werror -pipe -fomit-frame-pointer -Wstrict-prototypes
-+CFLAGS= -O2 -g -march=pentium -Werror -fomit-frame-pointer -Wstrict-prototypes
++CFLAGS= -O2 -g -march=pentium -Werror -fomit-frame-pointer -Wstrict-prototypes -ffreestanding
  
  # add the option for gcc 3.3 only, again, non-overridable
  ifeq ($(GCC_3.3), 1)
@@ -90,21 +97,6 @@ index 80ec92b..38ec3b0 100644
  endif
  
  LDFLAGS-ROM     = -s -S -T $(TOPDIR)/scripts/ldscript-crom.ld
-@@ -219,10 +214,10 @@ cromwell.bin:
- 
- # This is a local executable, so don't use a cross compiler...
- bin/imagebld: lib/imagebld/imagebld.c lib/crypt/sha1.c lib/crypt/md5.c
--	gcc -Ilib/crypt -o bin/sha1.o -c lib/crypt/sha1.c
--	gcc -Ilib/crypt -o bin/md5.o -c lib/crypt/md5.c
--	gcc -Ilib/crypt -o bin/imagebld.o -c lib/imagebld/imagebld.c
--	gcc -o bin/imagebld bin/imagebld.o bin/sha1.o bin/md5.o
-+	$(CC) -Ilib/crypt -o bin/sha1.o -c lib/crypt/sha1.c
-+	$(CC) -Ilib/crypt -o bin/md5.o -c lib/crypt/md5.c
-+	$(CC) -Ilib/crypt -o bin/imagebld.o -c lib/imagebld/imagebld.c
-+	$(CC) -o bin/imagebld bin/imagebld.o bin/sha1.o bin/md5.o
- 	
- imagecompress: obj/image-crom.bin bin/imagebld
- 	cp obj/image-crom.bin obj/image-crom.bin.tmp
 diff --git a/boot/BootResetAction.c b/boot/BootResetAction.c
 index ff59cef..2fa14d6 100644
 --- a/boot/BootResetAction.c
@@ -121,6 +113,37 @@ index ff59cef..2fa14d6 100644
  JPEG jpegBackdrop;
  
  int nTempCursorMbrX, nTempCursorMbrY;
+diff --git a/boot/LoadLinux.c b/boot/LoadLinux.c
+index a06d971..56f697e 100644
+--- a/boot/LoadLinux.c
++++ b/boot/LoadLinux.c
+@@ -37,8 +37,11 @@ void startLinux(void* initrdStart, unsigned long initrdSize, const char* appendL
+ void setup(void* KernelPos, void* PhysInitrdPos, unsigned long InitrdSize, const char* kernel_cmdline);
+ void I2CRebootSlow(void);
+ 
+-void try_elf_boot (char* data, int len);
+-
++//try_elf_boot is part of etherboot, which is not being compiled
++//TODO: add compile time check for this
++void try_elf_boot (char* data, int len)
++{
++}
+ 
+ void BootPrintConfig(CONFIGENTRY *config) {
+ 	int CharsProcessed=0, CharsSinceNewline=0, Length=0;
+diff --git a/boot_rom/2bBootLibrary.c b/boot_rom/2bBootLibrary.c
+index 92a3076..424983c 100644
+--- a/boot_rom/2bBootLibrary.c
++++ b/boot_rom/2bBootLibrary.c
+@@ -10,7 +10,7 @@
+ */
+ // 20040924 - Updated by dmp to include more str functions, and use ASM
+ // where possible. ASM shamelessly stolen from linux-2.6.8.1
+-
++typedef unsigned int size_t;
+ #include "stdint.h"
+ 
+ size_t strlen(const char * s)
 diff --git a/boot_rom/2bBootStartBios.c b/boot_rom/2bBootStartBios.c
 index e35a643..9f09c07 100644
 --- a/boot_rom/2bBootStartBios.c
@@ -134,6 +157,24 @@ index e35a643..9f09c07 100644
  extern int decompress_kernel(char*out, char *data, int len);
  
  u32 PciWriteDword(unsigned int bus, unsigned int dev, unsigned int func, unsigned int reg_off, unsigned int dw) 
+diff --git a/boot_rom/2bload.h b/boot_rom/2bload.h
+index 61e4e0f..26d535e 100644
+--- a/boot_rom/2bload.h
++++ b/boot_rom/2bload.h
+@@ -10,11 +10,12 @@
+  *                                                                         *
+  ***************************************************************************/
+ 
++typedef unsigned int size_t;
++
+ #include "2bconsts.h"
+ #include "stdint.h"
+ #include "cromwell_types.h"
+ 
+-
+ /////////////////////////////////
+ // LED-flashing codes
+ // or these together as argument to I2cSetFrontpanelLed
 diff --git a/boot_rom/bootrom.ld b/boot_rom/bootrom.ld
 index 82b8775..cd87ebf 100644
 --- a/boot_rom/bootrom.ld
@@ -258,6 +299,22 @@ index 0ddf82d..f76c03f 100644
  static const unsigned char focus_defaults[0xc4] = {
  	/*0x00*/ 0x00,0x00,0x00,0x00,0x80,0x02,0xaa,0x0a,
  	/*0x08*/ 0x00,0x10,0x00,0x00,0x03,0x21,0x15,0x04,
+diff --git a/etherboot/arch/i386/core/xbox.c b/etherboot/arch/i386/core/xbox.c
+index e1dc2a8..cf2b40e 100644
+--- a/etherboot/arch/i386/core/xbox.c
++++ b/etherboot/arch/i386/core/xbox.c
+@@ -7,6 +7,11 @@
+ 
+ #include <stdarg.h>
+ 
++typedef unsigned int u32;
++
++extern int printk(const char *szFormat, ...);
++extern void wait_us(u32 ticks);
++
+ #define MAX_APPEND_LINE_LENGTH 512
+ 
+ extern struct pci_driver forcedeth_driver;
 diff --git a/fs/cdrom/iso9660.c b/fs/cdrom/iso9660.c
 index 0ce326b..3a91fac 100644
 --- a/fs/cdrom/iso9660.c
@@ -288,7 +345,7 @@ index 736316a..1c61f8e 100644
  int checkForLastDirectoryEntry(unsigned char* entry) {
  
 diff --git a/fs/grub/char_io.c b/fs/grub/char_io.c
-index 9ce8f96..8ac2c99 100644
+index 9ce8f96..18078db 100644
 --- a/fs/grub/char_io.c
 +++ b/fs/grub/char_io.c
 @@ -19,6 +19,7 @@
@@ -299,6 +356,18 @@ index 9ce8f96..8ac2c99 100644
  
  char *
  convert_to_ascii (char *buf, int c,...)
+@@ -128,9 +129,8 @@ grub_isspace (int c)
+    a static library supporting minimal standard C functions and link
+    each image with the library. Complicated things should be left to
+    computer, definitely. -okuji  */
+-#if !defined(STAGE1_5) || defined(FSYS_VSTAFS)
+-int
+-grub_strcmp (const char *s1, const char *s2)
++#if 1 //!defined(STAGE1_5) || defined(FSYS_VSTAFS)
++int grub_strcmp (const char *s1, const char *s2)
+ {
+   while (*s1 || *s2)
+     {
 diff --git a/fs/grub/fsys_ufs2.c b/fs/grub/fsys_ufs2.c
 index 1971675..49b6c4a 100644
 --- a/fs/grub/fsys_ufs2.c
@@ -312,6 +381,61 @@ index 1971675..49b6c4a 100644
  /* used for filesystem map blocks */
  static int mapblock;
  static int mapblock_offset;
+diff --git a/include/boot.h b/include/boot.h
+index c2cff4e..c755ff5 100644
+--- a/include/boot.h
++++ b/include/boot.h
+@@ -1,6 +1,7 @@
+ #ifndef _Boot_H_
+ #define _Boot_H_
+ 
++typedef unsigned int size_t;
+ #include "config.h"
+ 
+ /***************************************************************************
+diff --git a/include/stdint.h b/include/stdint.h
+index 89edf8d..c6129be 100644
+--- a/include/stdint.h
++++ b/include/stdint.h
+@@ -1,19 +1,6 @@
+-#ifndef STDINT_H
+-#define STDINT_H
+-
+-typedef unsigned           size_t;
+-
+-typedef unsigned char      uint8_t;
+-typedef unsigned short     uint16_t;
+-typedef unsigned long      uint32_t;
+-typedef unsigned long long uint64_t;
+-
+-typedef signed char        int8_t;
+-typedef signed short       int16_t;
+-typedef signed long        int32_t;
+-typedef signed long long   int64_t;
+-
+-typedef short int          int_least16_t;
+-typedef unsigned short int uint_least16_t;
+-
+-#endif /* STDINT_H */
++#ifndef __STDINT_H_
++#define __STDINT_H_
++typedef unsigned int uint32_t;
++typedef unsigned char uint8_t;
++typedef short int_least16_t;
++#endif
+diff --git a/lib/crypt/sha1.h b/lib/crypt/sha1.h
+index e2b9f75..4dc9e94 100644
+--- a/lib/crypt/sha1.h
++++ b/lib/crypt/sha1.h
+@@ -17,7 +17,7 @@
+ #ifndef _SHA1_H_
+ #define _SHA1_H_  
+ 
+-#include <stdint.h>
++#include "stdint.h"
+ /*
+  * If you do not have the ISO standard stdint.h header file, then you
+  * must typdef the following:
 diff --git a/lib/eeprom/BootEEPROM.c b/lib/eeprom/BootEEPROM.c
 index a0f3545..81c86ef 100644
 --- a/lib/eeprom/BootEEPROM.c
@@ -454,15 +578,15 @@ index 0b54e44..a9db30b 100644
  	I2CRebootSlow();
  }
 diff --git a/menu/actions/VideoMenuActions.c b/menu/actions/VideoMenuActions.c
-index 2e6d7e2..3c07333 100644
+index 2e6d7e2..dc6f49b 100644
 --- a/menu/actions/VideoMenuActions.c
 +++ b/menu/actions/VideoMenuActions.c
 @@ -13,6 +13,9 @@
  #include "VideoInitialization.h"
  #include "BootEEPROM.h"
  
-+#define grub_strcmp strcmp
-+extern int strcmp (const char *s1, const char *s2);
++#define strcmp grub_strcmp
++extern int grub_strcmp (const char *s1, const char *s2);
 +
  void SetWidescreen(void *menuItemText) {
  	char *text = (char *)menuItemText;

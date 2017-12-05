@@ -18,7 +18,7 @@
        "revision": commitish to checkout (if not the default)
        "path": directory where git repository gets cloned/synced -->
   
-  <project name="oe-custom" path="poky/meta-uglyoldbob" remote="uglyoldbob" revision="refs/heads/master"/>
+  <project name="oe-custom" path="poky/meta-uglyoldbob" remote="uglyoldbob" revision="refs/heads/verdex"/>
   <project name="meta-browser" remote="OSS" revision="393d2aa15da21ffa532c3cd77d8cb91de997cd31" path="poky/meta-browser"/>
   <project name="poky" revision="refs/heads/krogoth" remote="yocto" />
   <project name="meta-openembedded" revision="refs/heads/krogoth"  remote="oe" path="poky/meta-openembedded" />

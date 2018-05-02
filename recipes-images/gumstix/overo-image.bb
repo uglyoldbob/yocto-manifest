@@ -6,9 +6,41 @@ IMAGE_FEATURES += "x11-base"
 # Uncomment below to include dev tools and packages
 # IMAGE_FEATURES += "tools-sdk dev-pkgs"
 
+WKS_FILE = "sdimage-gumstix.wks"
+IMAGE_FSTYPES = "wic"
+
 IMAGE_LINGUAS = "en-us"
 
 inherit core-image
+#inherit simulator
+
+do_image_wic[depends] += "mtools-native:do_populate_sysroot dosfstools-native:do_populate_sysroot"
+
+SIMULATOR_ARGS += " -sd ${DEPLOY_DIR_IMAGE}/${IMAGE_BASENAME}-overo.wic"
+
+addtask sudoers before do_image
+#    echo "user1 ALL=(ALL) ALL" > ${IMAGE_ROOTFS}${sysconfdir}/sudoers.d/001_first
+do_sudoers () {
+    echo "Testing"
+}
+
+IMAGE_POSTPROCESS_COMMAND += "do_sdbuild"
+do_sdbuild() {
+  echo "Deploy dir = ${DEPLOY_DIR_IMAGE}"
+  echo "work dir = ${WORKDIR}"
+  files="${DEPLOY_DIR_IMAGE}/*.wic"
+  for f in $files; do
+    if [ -z "$newest" ]; then
+      newest=$f
+    fi
+    if [[ $f -nt $newest ]]; then
+      newest=$f
+    fi
+  done
+  echo "Temp name2 = $newest"
+  bmaptool create $newest > ${WORKDIR}/image.bmap
+  echo $(bmaptool copy --bmap ${WORKDIR}/image.bmap $newest ${DISK_DEVICE})
+}
 
 # Gumstix machines individually RDEPEND on the firware they need but we repeat
 # it here as we might want to use the same image on multiple different machines.
@@ -52,6 +84,7 @@ MEDIA_TOOLS_INSTALL = " \
 GRAPHICS_LIBS = " \
   mtdev \ 
   tslib \
+  xserver-nodm-init \
 "  
 
 UTILITIES_INSTALL = " \

@@ -1,6 +1,6 @@
 require recipes-kernel/linux/linux-yocto.inc
 
-COMPATIBLE_MACHINE = "overoa;lsjdkfklahjdklf"
+COMPATIBLE_MACHINE = "overo"
 
 # Pull in the devicetree files into the rootfs
 RDEPENDS_kernel-base += "kernel-devicetree"
@@ -14,11 +14,15 @@ KERNEL_MODULE_AUTOLOAD += "g_cdc"
 LINUX_VERSION = "4.13"
 LINUX_VERSION_EXTENSION = "-custom"
 
-BOOT_SPLASH ?= "logo_linux_clut224-generic.ppm"
+BOOT_SPLASH = "TinyScreenBootup224.ppm"
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/linux-gumstix-4.13:"
 
 S = "${WORKDIR}/git"
+
+do_compile_prepend() {
+  cp -fv ${WORKDIR}/${BOOT_SPLASH} ${WORKDIR}/git/drivers/video/logo/logo_linux_clut224.ppm
+}
 
 # v4.13.y = 5f1d25a9a8c999ddb1a18a6b167f1284a46e4dd1
 SRCREV = "5f1d25a9a8c999ddb1a18a6b167f1284a46e4dd1"

@@ -1,0 +1,4 @@
+Common targets are:
+    overo-image
+    gumstix-console-image
+    gumstix-xfce-image

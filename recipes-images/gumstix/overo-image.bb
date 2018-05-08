@@ -18,10 +18,19 @@ do_image_wic[depends] += "mtools-native:do_populate_sysroot dosfstools-native:do
 
 SIMULATOR_ARGS += " -sd ${DEPLOY_DIR_IMAGE}/${IMAGE_BASENAME}-overo.wic"
 
-addtask sudoers before do_image
+addtask sudoers after do_rootfs before do_image
 #    echo "user1 ALL=(ALL) ALL" > ${IMAGE_ROOTFS}${sysconfdir}/sudoers.d/001_first
 do_sudoers () {
     echo "Testing"
+    echo "Does ${HOME}/.ssh/id_rsa.pub exist?"
+    if [ -f ${HOME}/.ssh/id_rsa.pub ]; then
+      echo "YES IT DOES $(date)"
+      install -d ${IMAGE_ROOTFS}/home/gumstix/.ssh -m 0700
+      cat ${HOME}/.ssh/id_rsa.pub >> ${IMAGE_ROOTFS}/home/gumstix/.ssh/authorized_keys
+      chmod 0600 ${IMAGE_ROOTFS}/home/gumstix/.ssh/authorized_keys
+      echo "%sudo ALL=(ALL) ALL" >> ${IMAGE_ROOTFS}${sysconfdir}/sudoers
+    fi
+    glib-compile-schemas ${IMAGE_ROOTFS}/usr/share/glib-2.0/schemas/
 }
 
 IMAGE_POSTPROCESS_COMMAND += "do_sdbuild"
@@ -121,6 +130,7 @@ IMAGE_INSTALL += " \
  polkit-gnome \
  polkit-group-rule-network \
  polkit-group-rule-datetime \
+ onboard \
 "
 
 IMAGE_INSTALL += "gprogs"

@@ -1,3 +1,15 @@
+FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}:"
+
+MODPATH := "${THISDIR}/${PN}"
+
+SRC_URI += " \
+ file://eth.network \
+"
+
+do_compile_prepend() {
+  cp -fv ${MODPATH}/eth.network ${WORKDIR}/
+}
+
 do_install_append() {
 	# Make journal storage volatile only
 	sed -i -e 's/.*Storage.*/Storage=volatile/' ${D}${sysconfdir}/systemd/journald.conf

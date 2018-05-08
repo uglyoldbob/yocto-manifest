@@ -288,7 +288,7 @@ DISTRO_FEATURES_BACKFILL_CONSIDERED = "sysvinit"
 #DISTRO_FEATURES_append = " pam"
 
 # Use lxdm as graphical greeter
-VIRTUAL-RUNTIME_graphical_init_manager = "lxdm"
+#VIRTUAL-RUNTIME_graphical_init_manager = "lxdm"
 
 # Use bluez5 rather than bluez4
 DISTRO_FEATURES_append = " bluez5"

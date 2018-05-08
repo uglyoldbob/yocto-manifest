@@ -1,0 +1,10 @@
+# Automatically bring-up wired interfaces. If possible, get an address using
+# DHCP.
+# See http://www.freedesktop.org/software/systemd/man/systemd.network.html
+[Match]
+Name=eth*
+
+[Network]
+Address=192.168.0.5/24
+Gateway=192.168.0.1
+DNS=192.168.0.6

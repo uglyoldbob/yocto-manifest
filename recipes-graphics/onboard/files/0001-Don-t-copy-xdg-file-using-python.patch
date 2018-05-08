@@ -1,0 +1,24 @@
+From bb3c3866bf2c383eac21a6535f67b782e3bb853e Mon Sep 17 00:00:00 2001
+From: Thomas Epperson <tepperson@briskheat.com>
+Date: Thu, 3 May 2018 15:25:50 -0400
+Subject: [PATCH] Don't copy xdg file using python
+
+---
+ setup.py | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/setup.py b/setup.py
+index 27000f3..9045d19 100755
+--- a/setup.py
++++ b/setup.py
+@@ -436,7 +436,6 @@ DistUtilsExtra.auto.setup(
+     ext_modules = [extension_osk, extension_lm],
+ 
+     cmdclass = {'test': TestCommand,
+-                'build_i18n': build_i18n_custom,
+                 'build_ext': build_ext_custom},
+ )
+ 
+-- 
+1.9.1
+

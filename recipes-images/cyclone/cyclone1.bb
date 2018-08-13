@@ -16,7 +16,11 @@ inherit core-image
 
 do_image_wic[depends] += "mtools-native:do_populate_sysroot dosfstools-native:do_populate_sysroot"
 
-SIMULATOR_ARGS += " -sd ${DEPLOY_DIR_IMAGE}/${IMAGE_BASENAME}-overo.wic"
+addtask builduboot after do_rootfs before do_image
+do_builduboot () {
+  dd if=${DEPLOY_DIR_IMAGE}/u-boot-with-spl.sfp of=${DEPLOY_DIR_IMAGE}/custom.img
+  dd if=${DEPLOY_DIR_IMAGE}/u-boot-dtb.img of=${DEPLOY_DIR_IMAGE}/custom.img bs=512 seek=2432
+}
 
 addtask sudoers after do_rootfs before do_image
 #    echo "user1 ALL=(ALL) ALL" > ${IMAGE_ROOTFS}${sysconfdir}/sudoers.d/001_first

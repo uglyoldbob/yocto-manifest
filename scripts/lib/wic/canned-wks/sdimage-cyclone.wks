@@ -2,7 +2,7 @@
 # long-description: Creates a partitioned SD card image for a cyclone V soc.
 
 #--system-id=0xa2
-part /PL --source rawcopy --sourceparams="file=whatever.bla" --ondisk mmcblk0 --fstype=vfat --label=pl --align 64 --size 16
+part /PL --source rawcopy --sourceparams="file=custom.img" --ondisk mmcblk0 --fstype=vfat --label=pl --align 64 --size 16
 
 part /boot --source bootimg-partition --ondisk mmcblk0 --fstype=vfat --label boot --active --align 64 --size 16
 

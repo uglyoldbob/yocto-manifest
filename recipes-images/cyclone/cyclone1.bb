@@ -22,6 +22,11 @@ do_builduboot () {
   dd if=${DEPLOY_DIR_IMAGE}/u-boot-dtb.img of=${DEPLOY_DIR_IMAGE}/custom.img bs=512 seek=2432
 }
 
+addtask copydtb after do_rootfs before do_image
+do_copydtb () {
+  cp ${DEPLOY_DIR_IMAGE}/zImage-socfpga_cyclone5_de0_sockit.dtb ${DEPLOY_DIR_IMAGE}/socfpga.dtb
+}
+
 addtask sudoers after do_rootfs before do_image
 #    echo "user1 ALL=(ALL) ALL" > ${IMAGE_ROOTFS}${sysconfdir}/sudoers.d/001_first
 do_sudoers () {

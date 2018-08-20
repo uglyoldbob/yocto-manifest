@@ -21,8 +21,8 @@ for f in $files; do
   fi
 done
 echo "Temp name2 = $newest"
-bmaptool create $newest > ./image.bmap
-echo $(sudo bmaptool copy --bmap ./image.bmap $newest $2)
-rm ./image.bmap
+#bmaptool create $newest > ./image.bmap
+echo $(sudo bmaptool copy --bmap $1/image.bmap $newest $2)
+#rm ./image.bmap
 
 sfdisk -c $2 1 a2

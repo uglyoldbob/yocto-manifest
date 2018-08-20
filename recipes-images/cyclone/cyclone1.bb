@@ -56,7 +56,7 @@ do_sdbuild() {
     fi
   done
   echo "Temp name2 = $newest"
-  bmaptool create $newest > ${WORKDIR}/image.bmap
+  bmaptool create $newest > ${DEPLOY_DIR_IMAGE}/image.bmap
   echo "bmaptool copy --bmap ${WORKDIR}/image.bmap $newest ${DISK_DEVICE}"
 }
 

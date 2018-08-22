@@ -16,7 +16,7 @@ LINUX_VERSION_EXTENSION = "-custom"
 
 BOOT_SPLASH = "TinyScreenBootup224.ppm"
 
-FILESEXTRAPATHS_prepend := "${THISDIR}/linux-gumstix-4.13:"
+FILESEXTRAPATHS_prepend := "${THISDIR}/linux-cyclone-4.13:"
 
 S = "${WORKDIR}/git"
 

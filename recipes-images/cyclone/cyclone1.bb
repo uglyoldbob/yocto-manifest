@@ -56,8 +56,8 @@ do_sdbuild() {
     fi
   done
   echo "Temp name2 = $newest"
-  bmaptool create $newest > ${DEPLOY_DIR_IMAGE}/image.bmap
-  echo "bmaptool copy --bmap ${WORKDIR}/image.bmap $newest ${DISK_DEVICE}"
+  bmaptool create $newest > ${DEPLOY_DIR_IMAGE}/${PN}-${MACHINE}.bmap
+  echo "bmaptool copy --bmap ${WORKDIR}/${PN}-${MACHINE}.bmap $newest ${DISK_DEVICE}"
 }
 
 # Gumstix machines individually RDEPEND on the firware they need but we repeat

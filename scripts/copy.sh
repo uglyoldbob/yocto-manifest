@@ -8,6 +8,8 @@ if [ "$#" -ne 2 ]; then
     exit 1
 fi
 
+bitbake $1
+
 mach=$(bitbake -e | grep "MACHINE_ARCH=" | cut -d'"' -f2)
 machfolder="./tmp/deploy/images/$mach"
 

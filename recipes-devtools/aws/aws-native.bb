@@ -1,4 +1,4 @@
-DESCRIPTION = "AWS based programs"
+DESCRIPTION = "AWS library"
 SECTION = "base"
 LICENSE = "Apache-2.0"
 
@@ -21,7 +21,16 @@ S = "${WORKDIR}/git/aws"
 
 do_install_append() {
 	install -d ${D}${libdir}
+	install -d ${D}${includedir}
+	install -d ${D}${includedir}/aws
 	install -m 0644 libAwsIotSdk.a ${D}${libdir}
+	install -m 0755 ${S}/include/* ${D}${includedir}/aws
 }
 
-inherit native
+PROVIDES += "${PN}-dev ${PN}-staticdev"
+PACKAGES += "${PN}-dev ${PN}-staticdev"
+
+FILES_${PN}-staticdev = "${libdir}/*.a"
+FILES_${PN}-dev = "${S}/include"
+
+inherit native pkgconfig

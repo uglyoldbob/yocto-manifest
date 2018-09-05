@@ -13,4 +13,6 @@ SRC_URI = " \
 
 S = "${WORKDIR}/git"
 
+#BUILD_CFLAGS += " -g -O0"
+
 inherit native autotools

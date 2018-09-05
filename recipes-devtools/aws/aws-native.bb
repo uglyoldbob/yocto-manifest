@@ -20,6 +20,8 @@ do_compile_prepend() {
 
 S = "${WORKDIR}/git/aws"
 
+#BUILD_CFLAGS += " -g -O0"
+
 do_install_append() {
 	install -d ${D}${libdir}
 	install -d ${D}${includedir}
@@ -36,6 +38,7 @@ do_install_append() {
 	  sed -i -e 's/#include "aws_iot_config.h"//' $filename
 	  sed -i -e 's/#include <aws_/#include <aws\/aws_/' $filename
 	  sed -i -e 's/#include "aws_/#include "aws\/aws_/' $filename
+#	  sed -i -e 's/#ifdef ENABLE_IOT_.\+/#if 1/' $filename
 	done
 }
 

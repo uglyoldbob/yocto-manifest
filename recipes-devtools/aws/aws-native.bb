@@ -14,6 +14,7 @@ do_compile_prepend() {
   echo "clean:" >> ${S}/external_libs/CppUTest/Makefile
   cp ${S}/samples/linux/subscribe_publish_library_sample/Makefile ${S}
   sed -i -e 's/..\/..\/../.\//' ${S}/Makefile
+  sed -i -e 's/LOG_FLAGS +=/#LOG_FLAGS +=/' ${S}/Makefile
   cp ${S}/samples/linux/subscribe_publish_library_sample/aws_iot_config.h ${S}
   cp ${S}/samples/linux/subscribe_publish_library_sample/subscribe_publish_library_sample.c ${S}
 }

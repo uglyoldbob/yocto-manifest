@@ -142,6 +142,11 @@ IMAGE_INSTALL += " \
  polkit-group-rule-datetime \
 "
 
+IMAGE_INSTALL += " \
+ aws-progs \
+ aws-progs-keygen \
+"
+
 # Create a generic 'gumstix' user account, part of the gumstix group,
 # using '/bin/sh' and with a home directory '/home/gumstix' (see
 # /etc/default/useradd).  We set the password to 'gumstix' and add them

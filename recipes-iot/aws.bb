@@ -15,7 +15,8 @@ do_compile_prepend() {
   cp ${S}/samples/linux/subscribe_publish_library_sample/Makefile ${S}
   sed -i -e 's/..\/..\/../.\//' ${S}/Makefile
   sed -i -e 's/CC = gcc/#CC = gcc/' ${S}/Makefile
-  sed -i -e 's/LOG_FLAGS +=/#LOG_FLAGS +=/' ${S}/Makefile
+  sed -i -e 's/LOG_FLAGS += -DENABLE_IOT_DEBUG/#LOG_FLAGS += -DENABLE_IOT_DEBUG/' ${S}/Makefile
+  sed -i -e 's/LOG_FLAGS += -DENABLE_IOT_INFO/#LOG_FLAGS += -DENABLE_IOT_INFO/' ${S}/Makefile
   cp ${S}/samples/linux/subscribe_publish_library_sample/aws_iot_config.h ${S}
   cp ${S}/samples/linux/subscribe_publish_library_sample/subscribe_publish_library_sample.c ${S}
 }

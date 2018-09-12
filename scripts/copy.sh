@@ -1,5 +1,7 @@
 #!/bin/sh
 
+set -e
+
 if [ "$#" -ne 2 ]; then
     echo "Illegal number of parameters"
     echo "Usage - $0 a b"
@@ -16,7 +18,7 @@ machfolder="./tmp/deploy/images/$mach"
 calcname="$machfolder/$1-$mach.wic"
 calcname2="$machfolder/$1-$mach.bmap"
 
-for n in $2* ; do umount $n ; done
+for n in $2* ; do umount $n || true ; done
 
 echo "Deploy dir = $machfolder"
 

@@ -27,11 +27,8 @@ do_install_append() {
 	install -d ${D}${libdir}
 	install -d ${D}${includedir}
 	install -d ${D}${includedir}/aws
-	install -d ${D}${includedir}/mbedtls
 	install -m 0644 libAwsIotSdk.a ${D}${libdir}
-	install -m 0644 ${S}/external_libs/mbedTLS/library/*.a ${D}${libdir}
 	install -m 0755 ${S}/include/* ${D}${includedir}/aws
-	install -m 0755 ${S}/external_libs/mbedTLS/include/mbedtls/* ${D}${includedir}/mbedtls
 	install -m 0755 ${S}/platform/linux/common/timer_platform.h ${D}${includedir}/aws
 	install -m 0755 ${S}/platform/linux/mbedtls/network_platform.h ${D}${includedir}/aws
 

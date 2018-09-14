@@ -1,0 +1,24 @@
+From 5d71c1c6308dda94979e91ff9aa49fd61c168de8 Mon Sep 17 00:00:00 2001
+From: Thomas Epperson <tepperson@briskheat.com>
+Date: Fri, 14 Sep 2018 08:34:02 -0400
+Subject: [PATCH] Build shared instead of static library.
+
+---
+ library/CMakeLists.txt | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/library/CMakeLists.txt b/library/CMakeLists.txt
+index b408452..cd3c018 100644
+--- a/library/CMakeLists.txt
++++ b/library/CMakeLists.txt
+@@ -1,5 +1,5 @@
+-option(USE_STATIC_MBEDTLS_LIBRARY "Build mbed TLS static library." ON)
+-option(USE_SHARED_MBEDTLS_LIBRARY "Build mbed TLS shared library." OFF)
++option(USE_STATIC_MBEDTLS_LIBRARY "Build mbed TLS static library." OFF)
++option(USE_SHARED_MBEDTLS_LIBRARY "Build mbed TLS shared library." ON)
+ option(LINK_WITH_PTHREAD "Explicitly link mbed TLS library to pthread." OFF)
+ 
+ set(src_crypto
+-- 
+1.9.1
+

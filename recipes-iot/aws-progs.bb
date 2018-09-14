@@ -2,7 +2,8 @@ DESCRIPTION = "AWS based programs"
 SECTION = "base"
 LICENSE = "GPLv3"
 
-DEPENDS = "aws"
+DEPENDS = "aws mbedtls"
+RDEPENDS_aws-progs = "mbedtls"
 RDEPENDS_aws-progs-keygen = "systemd openssl"
 
 LIC_FILES_CHKSUM = "file://LICENSE;md5=d32239bcb673463ab874e80d47fae504"

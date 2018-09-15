@@ -1,7 +1,7 @@
 From 4ada7b8641884bda1b032316c4da969ad5dc8efd Mon Sep 17 00:00:00 2001
 From: Thomas Epperson <thomas.epperson@gmail.com>
 Date: Mon, 3 Sep 2018 20:39:12 -0400
-Subject: [PATCH] Modifications for newer toolchain
+Subject: [PATCH 2/3] Modifications for newer toolchain
 
 ---
  Makefile                 | 16 +++++++++++-----

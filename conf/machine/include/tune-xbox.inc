@@ -6,6 +6,7 @@ TUNE_PKGARCH = "xbox"
 # Extra tune features
 TUNEVALID[xbox] = "Enable xbox specific processor optimizations"
 TUNE_CCARGS .= "${@bb.utils.contains('TUNE_FEATURES', 'xbox', ' -march=pentium', '', d)}"
+TUNE_CCARGS .= " -Wa,--divide"
 
 # Extra tune selections
 AVAILTUNES += "xbox"

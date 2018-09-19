@@ -24,17 +24,14 @@ do_install_append() {
 	rm ${D}/usr/lib/libmbedcrypto.so
 	rm ${D}/usr/lib/libmbedtls.so
 	rm ${D}/usr/lib/libmbedx509.so
-	rm ${D}/usr/lib/libmbedcrypto.so.2
-	rm ${D}/usr/lib/libmbedtls.so.10
-	rm ${D}/usr/lib/libmbedx509.so.0
-	mv ${D}/usr/lib/libmbedcrypto.so.* ${D}/usr/lib/libmbedcrypto.so
-	mv ${D}/usr/lib/libmbedtls.so.* ${D}/usr/lib/libmbedtls.so
-	mv ${D}/usr/lib/libmbedx509.so.* ${D}/usr/lib/libmbedx509.so
+	cp ${D}/usr/lib/libmbedcrypto.so.2.7.6 ${D}/usr/lib/libmbedcrypto.so
+	cp ${D}/usr/lib/libmbedtls.so.2.7.6 ${D}/usr/lib/libmbedtls.so
+	cp ${D}/usr/lib/libmbedx509.so.2.7.6 ${D}/usr/lib/libmbedx509.so
 }
 
 PROVIDES += "${PN}-examples ${PN}-dev ${PN}-staticdev"
 PACKAGES =+ "${PN}-examples"
 
-FILES_${PN} = "${libdir}/*.so"
+FILES_${PN} = "${libdir}/*"
 FILES_${PN}-examples = "${bindir}/*"
 FILES_${PN}-dev = "${includedir}/mbedtls/*"

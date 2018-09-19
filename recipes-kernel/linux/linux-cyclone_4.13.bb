@@ -7,10 +7,6 @@ RDEPENDS_kernel-base += "kernel-devicetree"
 
 KERNEL_DEVICETREE_de0nano = "socfpga_cyclone5_de0_sockit.dtb"
 
-# Auto-load a serial+ethernet connection on a USB OTG/peripheral
-# port if available
-KERNEL_MODULE_AUTOLOAD += "g_cdc"
-
 LINUX_VERSION = "4.13"
 LINUX_VERSION_EXTENSION = "-custom"
 

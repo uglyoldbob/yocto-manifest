@@ -12,10 +12,16 @@ if [ "$#" -ne 3 ]; then
   echo " c = xbox destination"
 fi
 
-ftp -n $1 <<END_SCRIPT
+FPATH=${3%/*}
+echo "Path is ${FPATH}"
+FILE=${3##*/}
+echo "Filename is ${FILE}"
+
+ftp -n $1 << END_SCRIPT
 quote USER xbox
 quote PASS xbox
-put $2 $3
+cd "$FPATH"
+put "$2" "$FILE"
 quit
 END_SCRIPT
 

@@ -7,6 +7,7 @@ RDEPENDS_${PN} = "libusb1"
 SRC_URI = "git://repo.or.cz/openocd.git \
            file://0001-Fix-libusb-1.0.22-deprecated-libusb_set_debug-with-l.patch \
            file://cyclone.cfg \
+           file://gdbstart \
           "
 SRCREV = "cdf1e826eb23c29de1019ce64125f644f01b0afe"
 
@@ -25,30 +26,25 @@ do_configure() {
     cp ${WORKDIR}/cyclone.cfg ${WORKDIR}/git/tcl/target
 }
 
-addtask openocd after do_install
+addtask openocd after do_populate_sysroot
 python do_openocd () {
   pathdir = d.getVar("datadir", True)
-  comand="openocd -f %s/openocd/scripts/interface/altera-usb-blaster2.cfg -f %s/openocd/scripts/target/cyclone.cfg" % (pathdir, pathdir)
-  oe_terminal("${SHELL} -c \"%s; if [ \$? -ne 0 ]; then echo 'Command failed.'; printf 'Press any key to continue... '; read r; fi\"" % comand, 'Running openocd', d)
+  print os.getcwd()
+  newpid = os.fork()
+  if newpid == 0:
+    time.sleep(5)
+    comand="gdb --command=../gdbstart"
+    oe_terminal("${SHELL} -c \"%s; if [ \$? -ne 0 ]; then echo 'Command failed.'; printf 'Press any key to continue... '; read r; fi\"" % comand, 'Running gdb', d)
+    exit(0)
+  else:
+    comand="openocd -f ./tcl/interface/altera-usb-blaster2.cfg -f ./tcl/target/cyclone.cfg"
+    oe_terminal("${SHELL} -c \"%s; if [ \$? -ne 0 ]; then echo 'Command failed.'; printf 'Press any key to continue... '; read r; fi\"" % comand, 'Running openocd', d)
+  bb.fatal("This is so the command will always run")
 }
 
 do_install() {
     oe_runmake DESTDIR=${D} install
-    if [ -e "${D}${infodir}" ]; then
-      rm -Rf ${D}${infodir}
-    fi
-    if [ -e "${D}${mandir}" ]; then
-      rm -Rf ${D}${mandir}
-    fi
-    if [ -e "${D}${bindir}/.debug" ]; then
-      rm -Rf ${D}${bindir}/.debug
-    fi
 }
-
-FILES_${PN} = " \
-  ${datadir}/openocd/* \
-  ${bindir}/openocd \
-  "
 
 PACKAGECONFIG[sysfsgpio] = "--enable-sysfsgpio,--disable-sysfsgpio"
 PACKAGECONFIG ??= "sysfsgpio"

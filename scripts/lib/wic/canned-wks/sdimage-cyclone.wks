@@ -4,7 +4,7 @@
 #--system-id=0xa2
 part --source rawcopy --sourceparams="file=custom.img" --ondisk mmcblk0 --align 64 --size 16
 
-part /boot --source bootimg-partition --ondisk mmcblk0 --fstype=vfat --label boot --active --align 64 --size 16
+part /bootpart --source bootimg-partition --ondisk mmcblk0 --fstype=vfat --label boot --active --align 64 --size 16
 
 part / --source rootfs --ondisk mmcblk0 --fstype=ext4 --label root --align 8192 --size 1024
 

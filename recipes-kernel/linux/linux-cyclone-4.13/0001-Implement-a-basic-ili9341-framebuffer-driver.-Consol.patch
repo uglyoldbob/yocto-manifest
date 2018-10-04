@@ -1,0 +1,340 @@
+From d274da883a9ebfa2adaf9cc706dd836e17a94cf8 Mon Sep 17 00:00:00 2001
+From: Thomas Epperson <tepperson@briskheat.com>
+Date: Thu, 4 Oct 2018 16:57:46 -0400
+Subject: [PATCH] Implement a basic ili9341 framebuffer driver. Console works.
+
+---
+ arch/arm/boot/dts/de0Test.dts |  15 ++-
+ drivers/video/fbdev/Makefile  |   2 +
+ drivers/video/fbdev/ili9341.c | 259 ++++++++++++++++++++++++++++++++++++++++++
+ include/video/ili9341.h       |  16 +++
+ 4 files changed, 284 insertions(+), 8 deletions(-)
+ create mode 100644 drivers/video/fbdev/ili9341.c
+ create mode 100644 include/video/ili9341.h
+
+diff --git a/arch/arm/boot/dts/de0Test.dts b/arch/arm/boot/dts/de0Test.dts
+index b705691..4eba40d 100644
+--- a/arch/arm/boot/dts/de0Test.dts
++++ b/arch/arm/boot/dts/de0Test.dts
+@@ -1,14 +1,13 @@
+ #include "socfpga_cyclone5_de0_sockit.dts"
+ 
+ / {
+-	framebuffer0: framebuffer0@0xc0000000
++	fb0: fb0@0xc0000000
+ 	{
+-		compatible = "simple-framebuffer";
+-		reg = <0xc0000000 (320*240*3)>;
+-		width = <320>;
+-		height = <240>;
+-		stride = <(320*4)>;
+-		format = "r5g6b5";
+-	};		
++		compatible = "ili9341";
++		reg = <0xc0000000 32>;
++	};	
+ };
+ 
++&fpga_bridge1 {
++	bridge-enable = <1>;
++};
+diff --git a/drivers/video/fbdev/Makefile b/drivers/video/fbdev/Makefile
+index ee8c814..152e884 100644
+--- a/drivers/video/fbdev/Makefile
++++ b/drivers/video/fbdev/Makefile
+@@ -149,3 +149,5 @@ obj-$(CONFIG_FB_SIMPLE)           += simplefb.o
+ 
+ # the test framebuffer is last
+ obj-$(CONFIG_FB_VIRTUAL)          += vfb.o
++
++obj-m				  += ili9341.o
+diff --git a/drivers/video/fbdev/ili9341.c b/drivers/video/fbdev/ili9341.c
+new file mode 100644
+index 0000000..e632490
+--- /dev/null
++++ b/drivers/video/fbdev/ili9341.c
+@@ -0,0 +1,259 @@
++#include <linux/delay.h>
++#include <linux/dma-mapping.h>
++#include <linux/fb.h>
++#include <linux/init.h>
++#include <linux/module.h>
++#include <linux/platform_device.h>
++
++#include <video/ili9341.h>
++
++MODULE_AUTHOR("Thomas Epperson <tepperson@briskheat.com>");
++MODULE_DESCRIPTION("ILI9341 LCD Driver");
++MODULE_LICENSE("GPL");
++
++static void ili9341_fillrect(struct fb_info *p, const struct fb_fillrect *region)
++{
++	struct ili9341 *data = p->par;
++	printk(KERN_ALERT "ILI9341: fillrect");
++}
++
++static void ili9341_copyarea(struct fb_info *p, const struct fb_copyarea *area)
++{
++	struct ili9341 *data = p->par;
++	printk(KERN_ALERT "ILI9341: copyarea");
++}
++
++static void ili9341_blit(struct fb_info *p, const struct fb_image *image)
++{
++	struct ili9341 *data = p->par;
++	int x, y;
++	uint32_t offset = 0;
++	/*dx, dy are upper left start coordinates
++	  width, height
++	  depth
++	  
++	*/
++	iowrite16(CMD_SET_COLUMN, data->regs);
++	wmb();
++	iowrite16(image->dx>>8, data->regs + 2);
++	wmb();
++	iowrite16(image->dx&0xFF, data->regs + 2);
++	wmb();
++	iowrite16((image->dx+image->width-1)>>8, data->regs + 2);
++	wmb();
++	iowrite16((image->dx+image->width-1)&0xFF, data->regs + 2);
++	wmb();
++
++	iowrite16(CMD_SET_ROW, data->regs);
++	wmb();
++	iowrite16(image->dy>>8, data->regs + 2);
++	wmb();
++	iowrite16(image->dy&0xFF, data->regs + 2);
++	wmb();
++	iowrite16((image->dy+image->height-1)>>8, data->regs + 2);
++	wmb();
++	iowrite16((image->dy+image->height-1)&0xFF, data->regs + 2);
++	wmb();
++
++	iowrite16(CMD_DISPLAY_WRITE, data->regs);
++	wmb();
++	for (x = 0; x < image->height; x++)
++	{
++		unsigned char temp;
++		for (y = 0; y < image->width; y++)
++		{
++			unsigned char calc;
++			switch (image->depth)
++			{
++				case 1:
++					calc = 7 - (offset % 8);
++					if ((image->data[offset/8]>>calc) & 1)
++					{
++						iowrite16(0x0000, data->regs + 2);
++						wmb();
++					}
++					else
++					{
++						iowrite16(0xFFFF, data->regs + 2);
++						wmb();
++					}
++					offset++;
++					break;
++				default:
++					iowrite16(image->data[offset++], data->regs + 2);
++					wmb();
++					break;
++			}
++		}
++		temp = offset % 8;
++		offset += (temp==0)?0:(8-temp);
++	}
++}
++
++/*
++write buf (user space) to the framebuffer
++info = fb_info struct
++buf = user buffer to write to the framebuffer
++count = number of bytes to write
++ppos = offset into the framebuffer
++*/
++static ssize_t ili9341_write(struct fb_info *info, const char __user *buf,
++		     size_t count, loff_t *ppos)
++{
++	struct ili9341 *data = info->par;
++	printk(KERN_ALERT "ILI9341: write function %d bytes", count);
++	return count;
++}
++
++static struct fb_ops ili9341_ops = {
++	.owner = THIS_MODULE,
++	.fb_fillrect = ili9341_fillrect,
++	.fb_copyarea = ili9341_copyarea,
++	.fb_imageblit = ili9341_blit,
++	.fb_write = ili9341_write,
++};
++
++static void ili9341_lcd_init(struct ili9341 *data)
++{
++	iowrite16(CMD_RESET, data->regs);	//1
++	wmb();
++	mdelay(100);
++	
++	iowrite16(CMD_MAC, data->regs);		//0x36
++	wmb();
++	iowrite16(0x0034, data->regs + 2);
++	wmb();
++	
++	iowrite16(CMD_PIX_FORM_SET, data->regs);//0x3a
++	wmb();
++	iowrite16(0x0055, data->regs + 2);
++	wmb();
++
++	iowrite16(CMD_GAMMA_SET, data->regs);	//0x26
++	wmb();
++	iowrite16(0x0001, data->regs + 2);
++	wmb();
++
++	iowrite16(CMD_SLEEP_OUT, data->regs);	//0x11
++	wmb();
++	mdelay(100);
++
++	iowrite16(CMD_DISPLAY_ON, data->regs);	//0x29
++	wmb();
++}
++
++static int ili9341_probe(struct platform_device *pdev)
++{
++	int ret;
++	struct resource *mem;
++	struct ili9341 *data;
++	struct device *dev;
++	void __iomem *buf;
++	dma_addr_t dma_addr;
++
++	printk(KERN_ALERT "ILI9341: Probing for ili9341");
++
++	dev = &pdev->dev;
++	data = devm_kzalloc(dev, sizeof(struct ili9341), GFP_KERNEL);
++
++	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++	printk(KERN_ALERT "ILI9341: Address 0x%x", mem->start);
++	data->regs = devm_ioremap_resource(dev, mem);
++
++	if (IS_ERR(data->regs))
++	{
++		printk(KERN_ALERT "ILI9341: Registers error");
++		return PTR_ERR(data->regs);
++	}
++
++	data->fbi = framebuffer_alloc(0, dev);
++	if (!data->fbi)
++	{
++		printk(KERN_ALERT "ILI9341: Failed to allocate framebuffer");
++		return -ENOMEM;
++	}
++
++	buf = dmam_alloc_coherent(dev, 320*240*2, &dma_addr, GFP_KERNEL);
++	if (!buf)
++	{
++		printk(KERN_ALERT "ILI9341: Failed to allocated DMA memory");
++		return -ENOMEM;
++	}
++
++	strcpy(data->fix.id, "ili9341");
++	data->fix.type = FB_TYPE_PACKED_PIXELS;
++	data->fix.visual = FB_VISUAL_TRUECOLOR;
++	data->fix.accel = FB_ACCEL_NONE;
++	data->fix.line_length = 320 * 16 / 8;
++	data->fix.smem_start = dma_addr;
++	data->fix.smem_len = 320*240*2;
++
++	data->var.width = 320;
++	data->var.height = 240;
++	data->var.bits_per_pixel = 16;
++	data->var.xres = 320;
++	data->var.yres = 240;
++	data->var.xres_virtual = 320;
++	data->var.yres_virtual = 240;
++	data->var.activate = FB_ACTIVATE_FORCE;
++	data->var.vmode = FB_VMODE_NONINTERLACED;
++
++	data->fbi->screen_base = buf;
++	data->fbi->fix = data->fix;
++	data->fbi->flags = FBINFO_DEFAULT;
++	data->fbi->var = data->var;
++	data->fbi->fbops = &ili9341_ops;
++
++	data->fbi->par = data;
++	//fbops
++	//pseudo_palette
++
++	ili9341_lcd_init(data);
++
++	printk(KERN_ALERT "ILI9341: Attempting to register framebuffer");
++
++	ret = register_framebuffer(data->fbi);
++	if (ret < 0)
++	{
++		printk(KERN_ALERT "ILI9341: Failed to register framebuffer (%d)", ret);
++		framebuffer_release(data->fbi);
++		return ret;
++	}
++
++	platform_set_drvdata(pdev, data);
++
++	printk(KERN_ALERT "ILI9341: Writing to offset 0");
++	printk(KERN_ALERT "ILI9341: Writing to offset 0 (dupe)");
++	iowrite16(42, data->regs);
++
++	return 0;
++}
++
++static int ili9341_remove(struct platform_device *pdev)
++{
++	struct ili9341 *data = platform_get_drvdata(pdev);
++	printk(KERN_ALERT "ILI9341: Removing ili9341");
++	
++
++	return 0;
++}
++
++static const struct of_device_id ili9341_of_match[] = {
++	{ .compatible = "ili9341", },
++	{},
++};
++MODULE_DEVICE_TABLE(of, ili9341_of_match);
++
++static struct platform_driver ili9341_driver = {
++	.probe = ili9341_probe,
++	.remove = ili9341_remove,
++	.driver = {
++		.name   = "ili9341",
++		.owner  = THIS_MODULE,
++		.of_match_table = of_match_ptr(ili9341_of_match),
++	},
++};
++
++module_platform_driver(ili9341_driver);
++
++
+diff --git a/include/video/ili9341.h b/include/video/ili9341.h
+new file mode 100644
+index 0000000..4a22c39
+--- /dev/null
++++ b/include/video/ili9341.h
+@@ -0,0 +1,16 @@
++#define CMD_RESET 0x01
++#define CMD_SLEEP_OUT 0x11
++#define CMD_GAMMA_SET 0x26
++#define CMD_DISPLAY_ON 0x29
++#define CMD_SET_COLUMN 0x2A
++#define CMD_SET_ROW 0x2B
++#define CMD_DISPLAY_WRITE 0x2C
++#define CMD_MAC 0x36
++#define CMD_PIX_FORM_SET 0x3A
++
++struct ili9341 {
++	void __iomem *regs;
++	struct fb_info *fbi;
++	struct fb_fix_screeninfo fix;
++	struct fb_var_screeninfo var;
++};
+-- 
+1.9.1
+

@@ -27,5 +27,5 @@ SRC_URI = " \
     git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git;nocheckout=1;branch=linux-4.13.y \
     file://defconfig \
     file://${BOOT_SPLASH} \
-    file://0001-Implement-a-basic-ili9341-framebuffer-driver.-Consol.patch \
+    file://0001-Implement-an-ili9341-framebuffer-driver.patch \
 "

@@ -1,14 +1,15 @@
-From d274da883a9ebfa2adaf9cc706dd836e17a94cf8 Mon Sep 17 00:00:00 2001
+From e0ba10573c8794c48abb71fa4979fb3887be58e5 Mon Sep 17 00:00:00 2001
 From: Thomas Epperson <tepperson@briskheat.com>
-Date: Thu, 4 Oct 2018 16:57:46 -0400
-Subject: [PATCH] Implement a basic ili9341 framebuffer driver. Console works.
+Date: Tue, 9 Oct 2018 15:26:31 -0400
+Subject: [PATCH] Implement an ili9341 framebuffer driver.
 
 ---
- arch/arm/boot/dts/de0Test.dts |  15 ++-
+ arch/arm/boot/dts/de0Test.dts |  15 +-
+ drivers/video/fbdev/Kconfig   |   5 +
  drivers/video/fbdev/Makefile  |   2 +
- drivers/video/fbdev/ili9341.c | 259 ++++++++++++++++++++++++++++++++++++++++++
- include/video/ili9341.h       |  16 +++
- 4 files changed, 284 insertions(+), 8 deletions(-)
+ drivers/video/fbdev/ili9341.c | 385 ++++++++++++++++++++++++++++++++++++++++++
+ include/video/ili9341.h       |  18 ++
+ 5 files changed, 417 insertions(+), 8 deletions(-)
  create mode 100644 drivers/video/fbdev/ili9341.c
  create mode 100644 include/video/ili9341.h
 
@@ -38,6 +39,22 @@ index b705691..4eba40d 100644
 +&fpga_bridge1 {
 +	bridge-enable = <1>;
 +};
+diff --git a/drivers/video/fbdev/Kconfig b/drivers/video/fbdev/Kconfig
+index 5c6696b..796f724 100644
+--- a/drivers/video/fbdev/Kconfig
++++ b/drivers/video/fbdev/Kconfig
+@@ -717,6 +717,11 @@ config FB_HP300
+ 	select FB_CFB_IMAGEBLIT
+ 	default y
+ 
++config FB_ILI9341
++	tristate "ILI9341 LCD support"
++	depends on FB
++	select FB_DEFERRED_IO
++
+ config FB_TGA
+ 	tristate "TGA/SFB+ framebuffer support"
+ 	depends on FB && (ALPHA || TC)
 diff --git a/drivers/video/fbdev/Makefile b/drivers/video/fbdev/Makefile
 index ee8c814..152e884 100644
 --- a/drivers/video/fbdev/Makefile
@@ -50,15 +67,15 @@ index ee8c814..152e884 100644
 +obj-m				  += ili9341.o
 diff --git a/drivers/video/fbdev/ili9341.c b/drivers/video/fbdev/ili9341.c
 new file mode 100644
-index 0000000..e632490
+index 0000000..4e16589
 --- /dev/null
 +++ b/drivers/video/fbdev/ili9341.c
-@@ -0,0 +1,259 @@
+@@ -0,0 +1,385 @@
 +#include <linux/delay.h>
-+#include <linux/dma-mapping.h>
 +#include <linux/fb.h>
 +#include <linux/init.h>
 +#include <linux/module.h>
++#include <linux/moduleparam.h>
 +#include <linux/platform_device.h>
 +
 +#include <video/ili9341.h>
@@ -66,6 +83,14 @@ index 0000000..e632490
 +MODULE_AUTHOR("Thomas Epperson <tepperson@briskheat.com>");
 +MODULE_DESCRIPTION("ILI9341 LCD Driver");
 +MODULE_LICENSE("GPL");
++
++static bool debug = false;
++module_param(debug, bool, 0660);
++
++static inline __u32 CNVT_TOHW(__u32 val, __u32 width)
++{
++        return ((val<<width) + 0x7FFF - val)>>16;
++}
 +
 +static void ili9341_fillrect(struct fb_info *p, const struct fb_fillrect *region)
 +{
@@ -144,29 +169,130 @@ index 0000000..e632490
 +		temp = offset % 8;
 +		offset += (temp==0)?0:(8-temp);
 +	}
++	if (debug)
++	{
++		printk(KERN_ALERT "ILI9341: blit depth %d w %d h %d x %d y %d", image->depth, image->width, image->height, image->dx, image->dy);
++	}
 +}
 +
-+/*
-+write buf (user space) to the framebuffer
-+info = fb_info struct
-+buf = user buffer to write to the framebuffer
-+count = number of bytes to write
-+ppos = offset into the framebuffer
-+*/
-+static ssize_t ili9341_write(struct fb_info *info, const char __user *buf,
-+		     size_t count, loff_t *ppos)
++static int ili9341_setcolreg(unsigned regno,
++                               unsigned red, unsigned green, unsigned blue,
++                               unsigned transp, struct fb_info *info)
++{
++    int ret = 1;
++
++    /*
++     * If greyscale is true, then we convert the RGB value
++     * to greyscale no matter what visual we are using.
++     */
++    if (info->var.grayscale)
++            red = green = blue = (19595 * red + 38470 * green +
++                                  7471 * blue) >> 16;
++    switch (info->fix.visual) {
++    case FB_VISUAL_TRUECOLOR:
++            if (regno < 16) {
++                    u32 *pal = info->pseudo_palette;
++                    u32 value;
++
++                    red = CNVT_TOHW(red, info->var.red.length);
++                    green = CNVT_TOHW(green, info->var.green.length);
++                    blue = CNVT_TOHW(blue, info->var.blue.length);
++                    transp = CNVT_TOHW(transp, info->var.transp.length);
++
++                    value = (red << info->var.red.offset) |
++                            (green << info->var.green.offset) |
++                            (blue << info->var.blue.offset) |
++                            (transp << info->var.transp.offset);
++
++                    pal[regno] = value;
++                    ret = 0;
++            }
++            break;
++    case FB_VISUAL_STATIC_PSEUDOCOLOR:
++    case FB_VISUAL_PSEUDOCOLOR:
++            break;
++    }
++    return ret;
++
++	return 0;
++}
++
++static int ili9341_mmap(struct fb_info *info, struct vm_area_struct *vma)
++{
++	printk(KERN_ALERT "ILI9341: mmap offset(%d), start(0x%x), addr(0x%x)", vma->vm_pgoff, vma->vm_start, info->fix.smem_start);
++	return remap_vmalloc_range(vma, (void *)info->fix.smem_start, vma->vm_pgoff);
++}
++
++static int ili9341_sync(struct fb_info *info)
 +{
 +	struct ili9341 *data = info->par;
-+	printk(KERN_ALERT "ILI9341: write function %d bytes", count);
-+	return count;
++	int x, y;
++	uint32_t offset = 0;
++
++	iowrite16(CMD_SET_COLUMN, data->regs);
++	wmb();
++	iowrite16(0, data->regs + 2);
++	wmb();
++	iowrite16(0, data->regs + 2);
++	wmb();
++	iowrite16((320-1)>>8, data->regs + 2);
++	wmb();
++	iowrite16((320-1)&0xFF, data->regs + 2);
++	wmb();
++
++	iowrite16(CMD_SET_ROW, data->regs);
++	wmb();
++	iowrite16(0, data->regs + 2);
++	wmb();
++	iowrite16(0, data->regs + 2);
++	wmb();
++	iowrite16((240-1)>>8, data->regs + 2);
++	wmb();
++	iowrite16((240-1)&0xFF, data->regs + 2);
++	wmb();
++
++	iowrite16(CMD_DISPLAY_WRITE, data->regs);
++	wmb();
++	for (x = 0; x < 240; x++)
++	{
++		unsigned char temp;
++		for (y = 0; y < 320; y++)
++		{
++			uint16_t t = data->vmem[offset];
++			t <<= 8;
++			t |= (data->vmem[offset+1]);
++			iowrite16(t, data->regs + 2);
++			offset += 2;
++			wmb();
++		}
++		temp = offset % 8;
++		offset += (temp==0)?0:(8-temp);
++	}
++	return 0;
 +}
++
++#ifdef CONFIG_FB_DEFERRED_IO
++static void ili9341_update(struct fb_info *info, struct list_head *pagelist)
++{
++	ili9341_sync(info);
++}
++
++static struct fb_deferred_io ili9341_defio = {
++        .delay          = HZ / 35,
++        .deferred_io    = &ili9341_update,
++};
++#else
++#error "Cannot update ili9341"
++#endif
 +
 +static struct fb_ops ili9341_ops = {
 +	.owner = THIS_MODULE,
 +	.fb_fillrect = ili9341_fillrect,
 +	.fb_copyarea = ili9341_copyarea,
 +	.fb_imageblit = ili9341_blit,
-+	.fb_write = ili9341_write,
++	.fb_setcolreg = ili9341_setcolreg,
++	.fb_mmap = ili9341_mmap,
++	.fb_sync = ili9341_sync,
 +};
 +
 +static void ili9341_lcd_init(struct ili9341 *data)
@@ -205,7 +331,8 @@ index 0000000..e632490
 +	struct ili9341 *data;
 +	struct device *dev;
 +	void __iomem *buf;
-+	dma_addr_t dma_addr;
++	
++	int cmap_len;
 +
 +	printk(KERN_ALERT "ILI9341: Probing for ili9341");
 +
@@ -229,19 +356,22 @@ index 0000000..e632490
 +		return -ENOMEM;
 +	}
 +
-+	buf = dmam_alloc_coherent(dev, 320*240*2, &dma_addr, GFP_KERNEL);
-+	if (!buf)
++	//devm_kzalloc(dev, 320*240*2, GFP_KERNEL)))
++	if (!(data->vmem = vmalloc_32_user(PAGE_ALIGN(320*240*2))))
 +	{
-+		printk(KERN_ALERT "ILI9341: Failed to allocated DMA memory");
++		framebuffer_release(data->fbi);
 +		return -ENOMEM;
 +	}
++	printk(KERN_ALERT "ILI9341: vmem = 0x%x", data->vmem);
++	data->fbi->screen_base = data->vmem;
++	data->fix.smem_start = (unsigned long) data->vmem;
++	data->fix.smem_len = 320*240*2;
 +
 +	strcpy(data->fix.id, "ili9341");
 +	data->fix.type = FB_TYPE_PACKED_PIXELS;
 +	data->fix.visual = FB_VISUAL_TRUECOLOR;
 +	data->fix.accel = FB_ACCEL_NONE;
 +	data->fix.line_length = 320 * 16 / 8;
-+	data->fix.smem_start = dma_addr;
 +	data->fix.smem_len = 320*240*2;
 +
 +	data->var.width = 320;
@@ -253,34 +383,43 @@ index 0000000..e632490
 +	data->var.yres_virtual = 240;
 +	data->var.activate = FB_ACTIVATE_FORCE;
 +	data->var.vmode = FB_VMODE_NONINTERLACED;
++	data->var.red.length = 5;
++	data->var.red.offset = 0;
++	data->var.green.length = 6;
++	data->var.green.offset = 5;
++	data->var.blue.length = 5;
++	data->var.blue.offset = 11;
 +
-+	data->fbi->screen_base = buf;
++	data->fbi->screen_base = data->vmem;
 +	data->fbi->fix = data->fix;
 +	data->fbi->flags = FBINFO_DEFAULT;
 +	data->fbi->var = data->var;
 +	data->fbi->fbops = &ili9341_ops;
++	data->fbi->dev = dev;
 +
 +	data->fbi->par = data;
-+	//fbops
-+	//pseudo_palette
++
++	data->fbi->pseudo_palette = data->pseudo_palette;
 +
 +	ili9341_lcd_init(data);
 +
 +	printk(KERN_ALERT "ILI9341: Attempting to register framebuffer");
 +
++#ifdef CONFIG_FB_DEFERRED_IO
++	data->fbi->fbdefio = &ili9341_defio;
++        fb_deferred_io_init(data->fbi);
++#endif
++
 +	ret = register_framebuffer(data->fbi);
 +	if (ret < 0)
 +	{
 +		printk(KERN_ALERT "ILI9341: Failed to register framebuffer (%d)", ret);
++		vfree(data->fbi->vmem);
 +		framebuffer_release(data->fbi);
 +		return ret;
 +	}
 +
 +	platform_set_drvdata(pdev, data);
-+
-+	printk(KERN_ALERT "ILI9341: Writing to offset 0");
-+	printk(KERN_ALERT "ILI9341: Writing to offset 0 (dupe)");
-+	iowrite16(42, data->regs);
 +
 +	return 0;
 +}
@@ -289,8 +428,12 @@ index 0000000..e632490
 +{
 +	struct ili9341 *data = platform_get_drvdata(pdev);
 +	printk(KERN_ALERT "ILI9341: Removing ili9341");
-+	
-+
++	if (data)
++	{
++		unregister_framebuffer(data->fbi);
++		vfree(data->fbi->vmem);
++		framebuffer_release(data->fbi);
++	}
 +	return 0;
 +}
 +
@@ -315,10 +458,10 @@ index 0000000..e632490
 +
 diff --git a/include/video/ili9341.h b/include/video/ili9341.h
 new file mode 100644
-index 0000000..4a22c39
+index 0000000..528b362
 --- /dev/null
 +++ b/include/video/ili9341.h
-@@ -0,0 +1,16 @@
+@@ -0,0 +1,18 @@
 +#define CMD_RESET 0x01
 +#define CMD_SLEEP_OUT 0x11
 +#define CMD_GAMMA_SET 0x26
@@ -334,6 +477,8 @@ index 0000000..4a22c39
 +	struct fb_info *fbi;
 +	struct fb_fix_screeninfo fix;
 +	struct fb_var_screeninfo var;
++	char __iomem *vmem;
++	unsigned long pseudo_palette[25];
 +};
 -- 
 1.9.1

@@ -1,6 +1,6 @@
-From e0ba10573c8794c48abb71fa4979fb3887be58e5 Mon Sep 17 00:00:00 2001
+From f4c20f42a9bf6fe993b69c450ae97e1041559687 Mon Sep 17 00:00:00 2001
 From: Thomas Epperson <tepperson@briskheat.com>
-Date: Tue, 9 Oct 2018 15:26:31 -0400
+Date: Tue, 9 Oct 2018 16:14:50 -0400
 Subject: [PATCH] Implement an ili9341 framebuffer driver.
 
 ---
@@ -67,7 +67,7 @@ index ee8c814..152e884 100644
 +obj-m				  += ili9341.o
 diff --git a/drivers/video/fbdev/ili9341.c b/drivers/video/fbdev/ili9341.c
 new file mode 100644
-index 0000000..4e16589
+index 0000000..cda3697
 --- /dev/null
 +++ b/drivers/video/fbdev/ili9341.c
 @@ -0,0 +1,385 @@
@@ -414,7 +414,7 @@ index 0000000..4e16589
 +	if (ret < 0)
 +	{
 +		printk(KERN_ALERT "ILI9341: Failed to register framebuffer (%d)", ret);
-+		vfree(data->fbi->vmem);
++		vfree(data->vmem);
 +		framebuffer_release(data->fbi);
 +		return ret;
 +	}
@@ -431,7 +431,7 @@ index 0000000..4e16589
 +	if (data)
 +	{
 +		unregister_framebuffer(data->fbi);
-+		vfree(data->fbi->vmem);
++		vfree(data->vmem);
 +		framebuffer_release(data->fbi);
 +	}
 +	return 0;

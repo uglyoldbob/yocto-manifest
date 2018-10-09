@@ -1,0 +1,88 @@
+From a88605ec391d46fc9f5c1699828dde0ec90c9312 Mon Sep 17 00:00:00 2001
+From: Thomas Epperson <tepperson@briskheat.com>
+Date: Fri, 5 Oct 2018 10:31:06 -0400
+Subject: [PATCH] Many fixes for cyclone V Disable warm boot from OCRAM
+ Increase number of sectors u-boot spl will load Load fpga binary if present,
+ also enable fpga bridge Change partition numbers for root partition and boot
+ partition
+
+---
+ arch/arm/mach-socfpga/misc.c           | 9 ---------
+ include/configs/socfpga_common.h       | 2 +-
+ include/configs/socfpga_de0_nano_soc.h | 9 +++++----
+ 3 files changed, 6 insertions(+), 14 deletions(-)
+
+diff --git a/arch/arm/mach-socfpga/misc.c b/arch/arm/mach-socfpga/misc.c
+index ce3ff0a..30e00a5 100644
+--- a/arch/arm/mach-socfpga/misc.c
++++ b/arch/arm/mach-socfpga/misc.c
+@@ -325,15 +325,6 @@ int arch_early_init_r(void)
+ {
+ 	int i;
+ 
+-	/*
+-	 * Write magic value into magic register to unlock support for
+-	 * issuing warm reset. The ancient kernel code expects this
+-	 * value to be written into the register by the bootloader, so
+-	 * to support that old code, we write it here instead of in the
+-	 * reset_cpu() function just before reseting the CPU.
+-	 */
+-	writel(0xae9efebc, &sysmgr_regs->romcodegrp_warmramgrp_enable);
+-
+ 	for (i = 0; i < 8; i++)	/* Cache initial SW setting regs */
+ 		iswgrp_handoff[i] = readl(&sysmgr_regs->iswgrp_handoff[i]);
+ 
+diff --git a/include/configs/socfpga_common.h b/include/configs/socfpga_common.h
+index 0501bd1..52397e6 100644
+--- a/include/configs/socfpga_common.h
++++ b/include/configs/socfpga_common.h
+@@ -367,7 +367,7 @@ unsigned int cm_get_qspi_controller_clk_hz(void);
+ #else
+ #define CONFIG_SYS_MMCSD_FS_BOOT_PARTITION	3
+ #define CONFIG_SYS_MMCSD_RAW_MODE_U_BOOT_SECTOR	0xa00 /* offset 2560 sect (1M+256k) */
+-#define CONFIG_SYS_U_BOOT_MAX_SIZE_SECTORS	800 /* 400 KB */
++#define CONFIG_SYS_U_BOOT_MAX_SIZE_SECTORS	900 /* 450 KB */
+ #endif
+ #endif
+ 
+diff --git a/include/configs/socfpga_de0_nano_soc.h b/include/configs/socfpga_de0_nano_soc.h
+index cbc7396..96c813b 100644
+--- a/include/configs/socfpga_de0_nano_soc.h
++++ b/include/configs/socfpga_de0_nano_soc.h
+@@ -37,7 +37,7 @@
+ #define CONFIG_BOOTDELAY	3
+ #define CONFIG_BOOTFILE		"fitImage"
+ #define CONFIG_BOOTARGS		"console=ttyS0," __stringify(CONFIG_BAUDRATE)
+-#define CONFIG_BOOTCOMMAND	"run mmcload; run mmcboot"
++#define CONFIG_BOOTCOMMAND	"run fpgaload; run mmcload; run mmcboot"
+ #define CONFIG_LOADADDR		0x01000000
+ #define CONFIG_SYS_LOAD_ADDR	CONFIG_LOADADDR
+ 
+@@ -51,6 +51,7 @@
+ 
+ /* Extra Environment */
+ #define CONFIG_EXTRA_ENV_SETTINGS \
++	"fpgaload=if load mmc 0:2 ${loadaddr} fpga.rbf; then echo FPGA config located; fpga load 0 ${loadaddr} ${filesize}; else echo failed to find FPGA config;fi\0" \
+ 	"loadaddr= " __stringify(CONFIG_SYS_LOAD_ADDR) "\0" \
+ 	"ramboot=setenv bootargs " CONFIG_BOOTARGS ";" \
+ 		"bootm ${loadaddr} - ${fdt_addr}\0" \
+@@ -58,13 +59,13 @@
+ 	"fdt_addr=100\0" \
+ 	"fdtimage=socfpga.dtb\0" \
+ 	"bootm ${loadaddr} - ${fdt_addr}\0" \
+-	"mmcroot=/dev/mmcblk0p2\0" \
++	"mmcroot=/dev/mmcblk0p3\0" \
+ 	"mmcboot=setenv bootargs " CONFIG_BOOTARGS \
+ 		" root=${mmcroot} rw rootwait;" \
+ 		"bootz ${loadaddr} - ${fdt_addr}\0" \
+ 	"mmcload=mmc rescan;" \
+-		"load mmc 0:1 ${loadaddr} ${bootimage};" \
+-		"load mmc 0:1 ${fdt_addr} ${fdtimage}\0" \
++		"load mmc 0:2 ${loadaddr} ${bootimage};" \
++		"load mmc 0:2 ${fdt_addr} ${fdtimage}\0" \
+ 
+ /* The rest of the configuration is shared */
+ #include <configs/socfpga_common.h>
+-- 
+1.9.1
+

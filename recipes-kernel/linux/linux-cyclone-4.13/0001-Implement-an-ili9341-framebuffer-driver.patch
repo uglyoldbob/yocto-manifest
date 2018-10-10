@@ -1,6 +1,6 @@
-From f4c20f42a9bf6fe993b69c450ae97e1041559687 Mon Sep 17 00:00:00 2001
+From db19092a12322820485d5cdcfcba3f6491a4b755 Mon Sep 17 00:00:00 2001
 From: Thomas Epperson <tepperson@briskheat.com>
-Date: Tue, 9 Oct 2018 16:14:50 -0400
+Date: Wed, 10 Oct 2018 14:01:50 -0400
 Subject: [PATCH] Implement an ili9341 framebuffer driver.
 
 ---
@@ -67,7 +67,7 @@ index ee8c814..152e884 100644
 +obj-m				  += ili9341.o
 diff --git a/drivers/video/fbdev/ili9341.c b/drivers/video/fbdev/ili9341.c
 new file mode 100644
-index 0000000..cda3697
+index 0000000..d1dacdf
 --- /dev/null
 +++ b/drivers/video/fbdev/ili9341.c
 @@ -0,0 +1,385 @@
@@ -258,9 +258,9 @@ index 0000000..cda3697
 +		unsigned char temp;
 +		for (y = 0; y < 320; y++)
 +		{
-+			uint16_t t = data->vmem[offset];
++			uint16_t t = data->vmem[offset+1];
 +			t <<= 8;
-+			t |= (data->vmem[offset+1]);
++			t |= (data->vmem[offset]);
 +			iowrite16(t, data->regs + 2);
 +			offset += 2;
 +			wmb();

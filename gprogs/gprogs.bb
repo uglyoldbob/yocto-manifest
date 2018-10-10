@@ -26,5 +26,5 @@ ALLOW_EMPTY_${PN}-startup = "1"
 FILES_${PN}-startup = "${bindir}/run-gprogs.sh "
 
 FILES_${PN} = "${bindir}/gprogs \
- ${sysconfdir}/gprog/main.ui"
+ ${sysconfdir}/gprogs/main.ui"
 

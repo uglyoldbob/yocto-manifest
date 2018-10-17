@@ -1,41 +1,35 @@
-From db19092a12322820485d5cdcfcba3f6491a4b755 Mon Sep 17 00:00:00 2001
+From 0eb72e7756d02c08d92bdaf5f419ba97f0b25a98 Mon Sep 17 00:00:00 2001
 From: Thomas Epperson <tepperson@briskheat.com>
-Date: Wed, 10 Oct 2018 14:01:50 -0400
+Date: Wed, 17 Oct 2018 09:18:39 -0400
 Subject: [PATCH] Implement an ili9341 framebuffer driver.
 
 ---
- arch/arm/boot/dts/de0Test.dts |  15 +-
+ arch/arm/boot/dts/de0Test.dts |  13 ++
  drivers/video/fbdev/Kconfig   |   5 +
  drivers/video/fbdev/Makefile  |   2 +
  drivers/video/fbdev/ili9341.c | 385 ++++++++++++++++++++++++++++++++++++++++++
  include/video/ili9341.h       |  18 ++
- 5 files changed, 417 insertions(+), 8 deletions(-)
+ 5 files changed, 423 insertions(+)
+ create mode 100644 arch/arm/boot/dts/de0Test.dts
  create mode 100644 drivers/video/fbdev/ili9341.c
  create mode 100644 include/video/ili9341.h
 
 diff --git a/arch/arm/boot/dts/de0Test.dts b/arch/arm/boot/dts/de0Test.dts
-index b705691..4eba40d 100644
---- a/arch/arm/boot/dts/de0Test.dts
+new file mode 100644
+index 0000000..4eba40d
+--- /dev/null
 +++ b/arch/arm/boot/dts/de0Test.dts
-@@ -1,14 +1,13 @@
- #include "socfpga_cyclone5_de0_sockit.dts"
- 
- / {
--	framebuffer0: framebuffer0@0xc0000000
+@@ -0,0 +1,13 @@
++#include "socfpga_cyclone5_de0_sockit.dts"
++
++/ {
 +	fb0: fb0@0xc0000000
- 	{
--		compatible = "simple-framebuffer";
--		reg = <0xc0000000 (320*240*3)>;
--		width = <320>;
--		height = <240>;
--		stride = <(320*4)>;
--		format = "r5g6b5";
--	};		
++	{
 +		compatible = "ili9341";
 +		reg = <0xc0000000 32>;
 +	};	
- };
- 
++};
++
 +&fpga_bridge1 {
 +	bridge-enable = <1>;
 +};

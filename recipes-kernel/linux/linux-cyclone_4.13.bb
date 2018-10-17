@@ -5,7 +5,8 @@ COMPATIBLE_MACHINE = "de0nano"
 # Pull in the devicetree files into the rootfs
 RDEPENDS_kernel-base += "kernel-devicetree"
 
-KERNEL_DEVICETREE_de0nano = "socfpga_cyclone5_de0_sockit.dtb"
+KERNEL_DEVICETREE_de0nano = "socfpga_cyclone5_de0_sockit.dtb \
+ de0Test.dtb"
 
 LINUX_VERSION = "4.13"
 LINUX_VERSION_EXTENSION = "-custom"

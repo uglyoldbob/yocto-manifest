@@ -1,14 +1,14 @@
-From 9e1083e9cc9117ec9083a6360060a49299069196 Mon Sep 17 00:00:00 2001
+From 3bd0ee2cb27dc6e066bade4178b255c25c0b0152 Mon Sep 17 00:00:00 2001
 From: Thomas Epperson <tepperson@briskheat.com>
-Date: Mon, 29 Oct 2018 09:28:03 -0400
+Date: Mon, 29 Oct 2018 09:53:49 -0400
 Subject: [PATCH] Add memory map joystick support.
 
 ---
  arch/arm/boot/dts/de0Test.dts |  10 +++-
  drivers/input/misc/Kconfig    |   8 +++
  drivers/input/misc/Makefile   |   1 +
- drivers/input/misc/mmjoy.c    | 118 ++++++++++++++++++++++++++++++++++++++++++
- 4 files changed, 135 insertions(+), 2 deletions(-)
+ drivers/input/misc/mmjoy.c    | 119 ++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 136 insertions(+), 2 deletions(-)
  create mode 100644 drivers/input/misc/mmjoy.c
 
 diff --git a/arch/arm/boot/dts/de0Test.dts b/arch/arm/boot/dts/de0Test.dts
@@ -62,10 +62,10 @@ index b923a98..fdc7ee8 100644
 +obj-$(CONFIG_INPUT_MMJOY)		+= mmjoy.o
 diff --git a/drivers/input/misc/mmjoy.c b/drivers/input/misc/mmjoy.c
 new file mode 100644
-index 0000000..b5af61a
+index 0000000..6322adb1
 --- /dev/null
 +++ b/drivers/input/misc/mmjoy.c
-@@ -0,0 +1,118 @@
+@@ -0,0 +1,119 @@
 +#include <linux/device.h>
 +#include <linux/input.h>
 +#include <linux/input-polldev.h>
@@ -144,6 +144,7 @@ index 0000000..b5af61a
 +
 +	poll_dev->private = data;
 +	poll_dev->poll = mmjoy_poll;
++	poll_dev->poll_interval = 100;
 +	data->poll_dev = poll_dev;
 +
 +	poll_dev->input->name = pdev->name;

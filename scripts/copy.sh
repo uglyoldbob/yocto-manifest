@@ -2,6 +2,12 @@
 
 set -e
 
+function an_error_happened {
+  echo "An error happened"
+}
+
+trap an_error_happened ERR
+
 if [ "$#" -ne 2 ]; then
     echo "Illegal number of parameters"
     echo "Usage - $0 a b"
@@ -25,3 +31,5 @@ echo "Deploy dir = $machfolder"
 echo $(sudo bmaptool copy --bmap $calcname2 $calcname $2)
 
 sfdisk -c $2 1 a2
+
+echo "Success"

@@ -29,4 +29,5 @@ SRC_URI = " \
     file://defconfig \
     file://${BOOT_SPLASH} \
     file://0001-Implement-an-ili9341-framebuffer-driver.patch \
+    file://0002-Add-memory-map-joystick-support.patch \
 "

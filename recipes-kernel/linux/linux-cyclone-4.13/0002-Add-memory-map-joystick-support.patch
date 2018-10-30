@@ -1,21 +1,25 @@
-From 240fcf3d68e38fd2e7443bcf0e9a368a551c36f7 Mon Sep 17 00:00:00 2001
+From cef10a14f78c538958f0320f395ebed47168b445 Mon Sep 17 00:00:00 2001
 From: Thomas Epperson <tepperson@briskheat.com>
-Date: Tue, 30 Oct 2018 10:05:04 -0400
+Date: Tue, 30 Oct 2018 12:14:47 -0400
 Subject: [PATCH] Add memory map joystick support.
 
 ---
- arch/arm/boot/dts/de0Test.dts |  11 ++-
+ arch/arm/boot/dts/de0Test.dts |  12 +++-
  drivers/input/misc/Kconfig    |   8 +++
  drivers/input/misc/Makefile   |   1 +
  drivers/input/misc/mmjoy.c    | 159 ++++++++++++++++++++++++++++++++++++++++++
- 4 files changed, 177 insertions(+), 2 deletions(-)
+ 4 files changed, 178 insertions(+), 2 deletions(-)
  create mode 100644 drivers/input/misc/mmjoy.c
 
 diff --git a/arch/arm/boot/dts/de0Test.dts b/arch/arm/boot/dts/de0Test.dts
-index 4eba40d..84ec9e9 100644
+index 4eba40d..07c2fde 100644
 --- a/arch/arm/boot/dts/de0Test.dts
 +++ b/arch/arm/boot/dts/de0Test.dts
-@@ -4,8 +4,15 @@
+@@ -1,11 +1,19 @@
+ #include "socfpga_cyclone5_de0_sockit.dts"
++#include <dt-bindings/input/linux-event-codes.h>
+ 
+ / {
  	fb0: fb0@0xc0000000
  	{
  		compatible = "ili9341";
@@ -28,7 +32,7 @@ index 4eba40d..84ec9e9 100644
 +		compatible = "mmjoy";
 +		reg = <0xc0000100 256>;
 +		num_inputs = <6>;
-+		button-codes = <256 257 258 259 260 261>;
++		button-codes = <KEY_F13 KEY_F14 KEY_F15 KEY_F16 KEY_F17 KEY_1>;
 +	};
  };
  

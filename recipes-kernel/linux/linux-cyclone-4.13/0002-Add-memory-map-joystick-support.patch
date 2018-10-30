@@ -1,21 +1,21 @@
-From 3bd0ee2cb27dc6e066bade4178b255c25c0b0152 Mon Sep 17 00:00:00 2001
+From 240fcf3d68e38fd2e7443bcf0e9a368a551c36f7 Mon Sep 17 00:00:00 2001
 From: Thomas Epperson <tepperson@briskheat.com>
-Date: Mon, 29 Oct 2018 09:53:49 -0400
+Date: Tue, 30 Oct 2018 10:05:04 -0400
 Subject: [PATCH] Add memory map joystick support.
 
 ---
- arch/arm/boot/dts/de0Test.dts |  10 +++-
+ arch/arm/boot/dts/de0Test.dts |  11 ++-
  drivers/input/misc/Kconfig    |   8 +++
  drivers/input/misc/Makefile   |   1 +
- drivers/input/misc/mmjoy.c    | 119 ++++++++++++++++++++++++++++++++++++++++++
- 4 files changed, 136 insertions(+), 2 deletions(-)
+ drivers/input/misc/mmjoy.c    | 159 ++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 177 insertions(+), 2 deletions(-)
  create mode 100644 drivers/input/misc/mmjoy.c
 
 diff --git a/arch/arm/boot/dts/de0Test.dts b/arch/arm/boot/dts/de0Test.dts
-index 4eba40d..4a02153 100644
+index 4eba40d..84ec9e9 100644
 --- a/arch/arm/boot/dts/de0Test.dts
 +++ b/arch/arm/boot/dts/de0Test.dts
-@@ -4,8 +4,14 @@
+@@ -4,8 +4,15 @@
  	fb0: fb0@0xc0000000
  	{
  		compatible = "ili9341";
@@ -28,6 +28,7 @@ index 4eba40d..4a02153 100644
 +		compatible = "mmjoy";
 +		reg = <0xc0000100 256>;
 +		num_inputs = <6>;
++		button-codes = <256 257 258 259 260 261>;
 +	};
  };
  
@@ -62,10 +63,10 @@ index b923a98..fdc7ee8 100644
 +obj-$(CONFIG_INPUT_MMJOY)		+= mmjoy.o
 diff --git a/drivers/input/misc/mmjoy.c b/drivers/input/misc/mmjoy.c
 new file mode 100644
-index 0000000..6322adb1
+index 0000000..6a7f731
 --- /dev/null
 +++ b/drivers/input/misc/mmjoy.c
-@@ -0,0 +1,119 @@
+@@ -0,0 +1,159 @@
 +#include <linux/device.h>
 +#include <linux/input.h>
 +#include <linux/input-polldev.h>
@@ -82,6 +83,7 @@ index 0000000..6322adb1
 +	struct device *dev;
 +	int num_inputs;
 +	void __iomem *regs;
++	uint32_t *button_map;
 +};
 +
 +static void mmjoy_poll(struct input_polled_dev *poll_dev)
@@ -98,12 +100,15 @@ index 0000000..6322adb1
 +		temp = ioread16(data->regs + i*16);
 +		for (j = 0; j < 16; j++)
 +		{
-+			if ((i*16 + j) < data->num_inputs)
++			int which = i*16 + j;
++			if (which < data->num_inputs)
 +			{
-+				input_report_key(poll_dev->input, i * 16 + j + 1, temp & (1<<j));
++				if (data->button_map[which] != 0)
++					input_report_key(poll_dev->input, data->button_map[which], temp & (1<<j));
 +			}
 +		}
 +	}
++	input_sync(poll_dev->input);
 +}
 +
 +static int mmjoy_probe(struct platform_device *pdev)
@@ -114,6 +119,8 @@ index 0000000..6322adb1
 +	struct resource *mem;
 +	int err;
 +	int i;
++	int size;
++	uint32_t *array;
 +
 +	dev = &pdev->dev;
 +	data = devm_kzalloc(dev, sizeof(struct mmjoy), GFP_KERNEL);
@@ -138,13 +145,45 @@ index 0000000..6322adb1
 +		return -EINVAL;
 +	}
 +
++	size = device_property_read_u32_array(dev, "button-codes", NULL, 0);
++	if (size <= 0)
++	{
++		printk(KERN_ALERT "mmjoy: Something wrong with button-codes property: %d", size);
++		return -EINVAL;
++	}
++	else if (size < data->num_inputs)
++	{
++		printk(KERN_ALERT "mmjoy: Not enough data specified in button-codes property");
++		return -EINVAL;
++	}
++
++	array = devm_kmalloc_array(dev, size, sizeof(u32), GFP_KERNEL);
++	err = device_property_read_u32_array(dev, "button-codes", array, size);
++	if (err)
++	{
++		printk(KERN_ALERT "mmjoy: failed to read button-codes property: %d", err);
++		devm_kfree(dev, array);
++		return -EINVAL;
++	}
++
++	data->button_map = devm_kmalloc_array(dev, data->num_inputs, sizeof(u32), GFP_KERNEL);
++	for (i = 0; i < size; i++)
++	{
++		data->button_map[i] = array[i];
++	}
++
++	devm_kfree(dev, array);
++
 +	poll_dev = devm_input_allocate_polled_device(data->dev);
 +	if (!poll_dev)
++	{
++		devm_kfree(dev, data->button_map);
 +		return -ENOMEM;
++	}
 +
 +	poll_dev->private = data;
 +	poll_dev->poll = mmjoy_poll;
-+	poll_dev->poll_interval = 100;
++	poll_dev->poll_interval = 50;
 +	data->poll_dev = poll_dev;
 +
 +	poll_dev->input->name = pdev->name;
@@ -154,12 +193,14 @@ index 0000000..6322adb1
 +	if (err)
 +	{
 +		printk(KERN_ALERT "mmjoy: failed to register polled device");
++		devm_kfree(dev, data->button_map);
 +		return err;
 +	}
 +
 +	for (i = 0; i < data->num_inputs; i++)
 +	{
-+		input_set_capability(poll_dev->input, EV_KEY, i + 1);
++		if (data->button_map[i] != 0)
++			input_set_capability(poll_dev->input, EV_KEY, data->button_map[i]);
 +	}
 +
 +	return 0;

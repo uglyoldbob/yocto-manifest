@@ -12,16 +12,7 @@ COMPATIBLE_MACHINE = "xbox"
 
 PR = "r0"
 
-do_configure () {
-}
-
-do_compile () {
-       export CC="${TARGET_PREFIX}gcc"
-       export LD="${TARGET_PREFIX}ld"
-       export OBJCOPY="${TARGET_PREFIX}objcopy"
-       make
-}
-
+inherit native
 
 SRCREV = "2e1067aa837ca22462e49c880f20b8fa6bd38b77"
 SRC_URI = "git://github.com/not404/cromwell.git \

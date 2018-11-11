@@ -15,11 +15,11 @@
        "path": directory where git repository gets cloned/synced -->
   
   <project name="oe-custom" path="poky/meta-uglyoldbob" remote="uglyoldbob" revision="refs/heads/master"/>
-  <project name="poky" revision="refs/heads/master" remote="yocto" />
-  <project name="meta-openembedded" revision="refs/heads/master"  remote="oe" path="poky/meta-openembedded" />
-  <project name="meta-ros" revision="refs/heads/master"  remote="bmwcarit" path="poky/meta-ros" />
-  <project name="meta-java" revision="refs/heads/master"  remote="yocto" path="poky/meta-java" />
-  <project name="meta-qt5" revision="refs/heads/master"  remote="qt5" path="poky/meta-qt5" />
-  <project name="meta-qt4" revision="refs/heads/master"  remote="yocto" path="poky/meta-qt4" />
+  <project name="poky" revision="refs/heads/sumo" remote="yocto" />
+  <project name="meta-openembedded" revision="refs/heads/sumo"  remote="oe" path="poky/meta-openembedded" />
+  <project name="meta-ros" revision="refs/heads/sumo"  remote="bmwcarit" path="poky/meta-ros" />
+  <project name="meta-java" revision="refs/heads/sumo"  remote="yocto" path="poky/meta-java" />
+  <project name="meta-qt5" revision="refs/heads/sumo"  remote="qt5" path="poky/meta-qt5" />
+  <project name="meta-qt4" revision="refs/heads/sumo"  remote="yocto" path="poky/meta-qt4" />
 
 </manifest>

@@ -1,28 +1,40 @@
-From f77e60348386f5633ee6e9b2784576c6918e60d2 Mon Sep 17 00:00:00 2001
+From ff5cf06b6b210281417c8ad0f8e1500853325e95 Mon Sep 17 00:00:00 2001
 From: Thomas Epperson <thomas.epperson@gmail.com>
 Date: Fri, 9 Nov 2018 18:36:29 -0500
 Subject: [PATCH] Add support for the original microsoft xbox
 
 ---
  arch/x86/Kconfig                 |   4 +
+ arch/x86/dts/xbox.dts            |  15 +
  board/microsoft/Kconfig          |  18 +
  board/microsoft/xbox/Kconfig     |  15 +
  board/microsoft/xbox/MAINTAINERS |   3 +
- board/microsoft/xbox/Makefile    |   7 +
- board/microsoft/xbox/xbox.c      |   0
- configs/microsoft-xbox_defconfig | 977 +++++++++++++++++++++++++++++++
- include/configs/microsoft-xbox.h |  31 +
- 8 files changed, 1055 insertions(+)
+ board/microsoft/xbox/Makefile    |  10 +
+ board/microsoft/xbox/car.S       |  10 +
+ board/microsoft/xbox/cpu.c       |  46 ++
+ board/microsoft/xbox/dram.c      |  35 ++
+ board/microsoft/xbox/e820.c      |  45 ++
+ board/microsoft/xbox/start.S     |   9 +
+ board/microsoft/xbox/xbox.c      |  47 ++
+ configs/microsoft-xbox_defconfig | 863 +++++++++++++++++++++++++++++++
+ include/configs/microsoft-xbox.h |  31 ++
+ 14 files changed, 1151 insertions(+)
+ create mode 100644 arch/x86/dts/xbox.dts
  create mode 100644 board/microsoft/Kconfig
  create mode 100644 board/microsoft/xbox/Kconfig
  create mode 100644 board/microsoft/xbox/MAINTAINERS
  create mode 100644 board/microsoft/xbox/Makefile
+ create mode 100644 board/microsoft/xbox/car.S
+ create mode 100644 board/microsoft/xbox/cpu.c
+ create mode 100644 board/microsoft/xbox/dram.c
+ create mode 100644 board/microsoft/xbox/e820.c
+ create mode 100644 board/microsoft/xbox/start.S
  create mode 100644 board/microsoft/xbox/xbox.c
  create mode 100644 configs/microsoft-xbox_defconfig
  create mode 100644 include/configs/microsoft-xbox.h
 
 diff --git a/arch/x86/Kconfig b/arch/x86/Kconfig
-index a1c18d26e1..9495c7cb29 100644
+index 5c23b2cb57..d8c461bff8 100644
 --- a/arch/x86/Kconfig
 +++ b/arch/x86/Kconfig
 @@ -78,6 +78,9 @@ config VENDOR_GOOGLE
@@ -43,6 +55,27 @@ index a1c18d26e1..9495c7cb29 100644
  
  # platform-specific options below
  source "arch/x86/cpu/baytrail/Kconfig"
+diff --git a/arch/x86/dts/xbox.dts b/arch/x86/dts/xbox.dts
+new file mode 100644
+index 0000000000..bb94b9a138
+--- /dev/null
++++ b/arch/x86/dts/xbox.dts
+@@ -0,0 +1,15 @@
++/*
++ * Skeleton device tree; the bare minimum needed to boot; just include and
++ * add a compatible value.  The bootloader will typically populate the memory
++ * node.
++ */
++
++/dts-v1/;
++
++/ {
++	#address-cells = <1>;
++	#size-cells = <1>;
++	chosen { };
++	aliases { };
++	memory { device_type = "memory"; reg = <0 0>; };
++};
 diff --git a/board/microsoft/Kconfig b/board/microsoft/Kconfig
 new file mode 100644
 index 0000000000..083569500f
@@ -99,29 +132,257 @@ index 0000000000..ba63c447cc
 +S:	Maintained
 diff --git a/board/microsoft/xbox/Makefile b/board/microsoft/xbox/Makefile
 new file mode 100644
-index 0000000000..7361cd55f8
+index 0000000000..159ed0f037
 --- /dev/null
 +++ b/board/microsoft/xbox/Makefile
-@@ -0,0 +1,7 @@
+@@ -0,0 +1,10 @@
 +# SPDX-License-Identifier: GPL-2.0+
 +#
 +# (C) Copyright 2001-2006
 +# Wolfgang Denk, DENX Software Engineering, wd@denx.de.
 +# (C) Copyright 2010, Thomas Chou <thomas@wytron.com.tw>
 +
-+obj-y	:= xbox.o
++obj-y	+= xbox.o
++obj-y	+= start.o
++obj-y	+= car.o
++obj-y	+= dram.o
+diff --git a/board/microsoft/xbox/car.S b/board/microsoft/xbox/car.S
+new file mode 100644
+index 0000000000..67141cb922
+--- /dev/null
++++ b/board/microsoft/xbox/car.S
+@@ -0,0 +1,10 @@
++/*
++ * Copyright (C) 2015, Bin Meng <bmeng.cn@gmail.com>
++ *
++ * SPDX-License-Identifier:	GPL-2.0+
++ */
++
++.globl car_init
++car_init:
++	
++	jmp	car_init_ret
+diff --git a/board/microsoft/xbox/cpu.c b/board/microsoft/xbox/cpu.c
+new file mode 100644
+index 0000000000..b1a965e715
+--- /dev/null
++++ b/board/microsoft/xbox/cpu.c
+@@ -0,0 +1,46 @@
++/*
++ * Copyright (C) 2015, Miao Yan <yanmiaobest@gmail.com>
++ *
++ * SPDX-License-Identifier:	GPL-2.0+
++ */
++
++#include <common.h>
++#include <cpu.h>
++#include <dm.h>
++#include <errno.h>
++#include <qfw.h>
++#include <asm/cpu.h>
++
++DECLARE_GLOBAL_DATA_PTR;
++
++int cpu_qemu_get_desc(struct udevice *dev, char *buf, int size)
++{
++	if (size < CPU_MAX_NAME_LEN)
++		return -ENOSPC;
++
++	cpu_get_name(buf);
++
++	return 0;
++}
++
++static int cpu_qemu_get_count(struct udevice *dev)
++{
++	return qemu_fwcfg_online_cpus();
++}
++
++static const struct cpu_ops cpu_qemu_ops = {
++	.get_desc	= cpu_qemu_get_desc,
++	.get_count	= cpu_qemu_get_count,
++};
++
++static const struct udevice_id cpu_qemu_ids[] = {
++	{ .compatible = "cpu-qemu" },
++	{ }
++};
++
++U_BOOT_DRIVER(cpu_qemu_drv) = {
++	.name		= "cpu_qemu",
++	.id		= UCLASS_CPU,
++	.of_match	= cpu_qemu_ids,
++	.ops		= &cpu_qemu_ops,
++};
+diff --git a/board/microsoft/xbox/dram.c b/board/microsoft/xbox/dram.c
+new file mode 100644
+index 0000000000..a5be543cb0
+--- /dev/null
++++ b/board/microsoft/xbox/dram.c
+@@ -0,0 +1,35 @@
++/*
++ * Copyright (C) 2015, Bin Meng <bmeng.cn@gmail.com>
++ *
++ * SPDX-License-Identifier:	GPL-2.0+
++ */
++
++#include <common.h>
++#include <asm/post.h>
++
++DECLARE_GLOBAL_DATA_PTR;
++
++int dram_init(void)
++{
++
++	return 0;
++}
++
++int dram_init_banksize(void)
++{
++
++	return 0;
++}
++
++/*
++ * This function looks for the highest region of memory lower than 4GB which
++ * has enough space for U-Boot where U-Boot is aligned on a page boundary.
++ * It overrides the default implementation found elsewhere which simply
++ * picks the end of ram, wherever that may be. The location of the stack,
++ * the relocation address, and how far U-Boot is moved by relocation are
++ * set in the global data structure.
++ */
++ulong board_get_usable_ram_top(ulong total_size)
++{
++	return gd->ram_size;
++}
+diff --git a/board/microsoft/xbox/e820.c b/board/microsoft/xbox/e820.c
+new file mode 100644
+index 0000000000..c1c9b89def
+--- /dev/null
++++ b/board/microsoft/xbox/e820.c
+@@ -0,0 +1,45 @@
++/*
++ * (C) Copyright 2015 Miao Yan <yanmiaobest@gmail.com>
++ *
++ * SPDX-License-Identifier:	GPL-2.0+
++ */
++
++#include <common.h>
++#include <asm/e820.h>
++
++DECLARE_GLOBAL_DATA_PTR;
++
++unsigned install_e820_map(unsigned max_entries, struct e820entry *entries)
++{
++	entries[0].addr = 0;
++	entries[0].size = ISA_START_ADDRESS;
++	entries[0].type = E820_RAM;
++
++	entries[1].addr = ISA_START_ADDRESS;
++	entries[1].size = ISA_END_ADDRESS - ISA_START_ADDRESS;
++	entries[1].type = E820_RESERVED;
++
++	/*
++	 * since we use memalign(malloc) to allocate high memory for
++	 * storing ACPI tables, we need to reserve them in e820 tables,
++	 * otherwise kernel will reclaim them and data will be corrupted
++	 */
++	entries[2].addr = ISA_END_ADDRESS;
++	entries[2].size = gd->relocaddr - TOTAL_MALLOC_LEN - ISA_END_ADDRESS;
++	entries[2].type = E820_RAM;
++
++	/* for simplicity, reserve entire malloc space */
++	entries[3].addr = gd->relocaddr - TOTAL_MALLOC_LEN;
++	entries[3].size = TOTAL_MALLOC_LEN;
++	entries[3].type = E820_RESERVED;
++
++	entries[4].addr = gd->relocaddr;
++	entries[4].size = gd->ram_size - gd->relocaddr;
++	entries[4].type = E820_RESERVED;
++
++	entries[5].addr = CONFIG_PCIE_ECAM_BASE;
++	entries[5].size = CONFIG_PCIE_ECAM_SIZE;
++	entries[5].type = E820_RESERVED;
++
++	return 6;
++}
+diff --git a/board/microsoft/xbox/start.S b/board/microsoft/xbox/start.S
+new file mode 100644
+index 0000000000..a71db69be9
+--- /dev/null
++++ b/board/microsoft/xbox/start.S
+@@ -0,0 +1,9 @@
++/*
++ * Copyright (C) 2015, Bin Meng <bmeng.cn@gmail.com>
++ *
++ * SPDX-License-Identifier:	GPL-2.0+
++ */
++
++.globl early_board_init
++early_board_init:
++	jmp	early_board_init_ret
 diff --git a/board/microsoft/xbox/xbox.c b/board/microsoft/xbox/xbox.c
 new file mode 100644
-index 0000000000..e69de29bb2
+index 0000000000..2673732c74
+--- /dev/null
++++ b/board/microsoft/xbox/xbox.c
+@@ -0,0 +1,47 @@
++/*
++ * Copyright (C) 2015, Bin Meng <bmeng.cn@gmail.com>
++ *
++ * SPDX-License-Identifier:	GPL-2.0+
++ */
++
++#include <common.h>
++#include <pci.h>
++#include <qfw.h>
++#include <asm/irq.h>
++#include <asm/post.h>
++#include <asm/processor.h>
++
++#if !CONFIG_IS_ENABLED(SPL_X86_32BIT_INIT)
++int arch_cpu_init(void)
++{
++	post_code(POST_CPU_INIT);
++
++	return x86_cpu_init_f();
++}
++#endif
++
++#if !CONFIG_IS_ENABLED(EFI_STUB) && \
++	!CONFIG_IS_ENABLED(SPL_X86_32BIT_INIT)
++
++int checkcpu(void)
++{
++	return 0;
++}
++
++int print_cpuinfo(void)
++{
++	post_code(POST_CPU_INFO);
++	return default_print_cpuinfo();
++}
++#endif
++
++void reset_cpu(ulong addr)
++{
++	/* cold reset */
++	x86_full_reset();
++}
++
++int arch_early_init_r(void)
++{
++	return 0;
++}
 diff --git a/configs/microsoft-xbox_defconfig b/configs/microsoft-xbox_defconfig
 new file mode 100644
-index 0000000000..7480b1ea56
+index 0000000000..e1b5ca5c34
 --- /dev/null
 +++ b/configs/microsoft-xbox_defconfig
-@@ -0,0 +1,977 @@
+@@ -0,0 +1,863 @@
 +#
 +# Automatically generated file; DO NOT EDIT.
-+# U-Boot 2018.07 Configuration
++# U-Boot 2018.01 Configuration
 +#
 +CONFIG_CREATE_ARCH_SYMLINK=y
 +# CONFIG_ARC is not set
@@ -132,7 +393,6 @@ index 0000000000..7480b1ea56
 +# CONFIG_NDS32 is not set
 +# CONFIG_NIOS2 is not set
 +# CONFIG_PPC is not set
-+# CONFIG_RISCV is not set
 +# CONFIG_SANDBOX is not set
 +# CONFIG_SH is not set
 +CONFIG_X86=y
@@ -143,7 +403,6 @@ index 0000000000..7480b1ea56
 +CONFIG_SYS_CONFIG_NAME="microsoft-xbox"
 +CONFIG_SYS_TEXT_BASE=0xfff00000
 +CONFIG_SYS_MALLOC_F_LEN=0x800
-+CONFIG_SPL_SYS_MALLOC_F_LEN=0x800
 +CONFIG_IDENT_STRING=""
 +
 +#
@@ -162,7 +421,7 @@ index 0000000000..7480b1ea56
 +CONFIG_VENDOR_MICROSOFT=y
 +# CONFIG_INTEL_MID is not set
 +CONFIG_PCIE_ECAM_BASE=0xe0000000
-+CONFIG_DEFAULT_DEVICE_TREE=""
++CONFIG_DEFAULT_DEVICE_TREE="xbox"
 +CONFIG_SYS_CAR_ADDR=0xff7e0000
 +CONFIG_SYS_CAR_SIZE=0x20000
 +CONFIG_ROM_TABLE_ADDR=0xf0000
@@ -174,6 +433,8 @@ index 0000000000..7480b1ea56
 +CONFIG_AHCI=y
 +CONFIG_RAMBASE=0x100000
 +CONFIG_HPET_ADDRESS=0xfed00000
++# CONFIG_SMM_TSEG is not set
++# CONFIG_X86_RESET_VECTOR is not set
 +# CONFIG_X86_LOAD_FROM_32_BIT is not set
 +# CONFIG_HAVE_INTEL_ME is not set
 +# CONFIG_X86_RAMTEST is not set
@@ -206,10 +467,8 @@ index 0000000000..7480b1ea56
 +CONFIG_LOCALVERSION_AUTO=y
 +CONFIG_CC_OPTIMIZE_FOR_SIZE=y
 +# CONFIG_DISTRO_DEFAULTS is not set
-+# CONFIG_ENV_VARS_UBOOT_CONFIG is not set
-+# CONFIG_SYS_BOOT_GET_CMDLINE is not set
-+# CONFIG_SYS_BOOT_GET_KBD is not set
 +CONFIG_SYS_MALLOC_F=y
++CONFIG_SPL_SYS_MALLOC_F_LEN=0x800
 +CONFIG_TPL_SYS_MALLOC_F_LEN=0x800
 +CONFIG_EXPERT=y
 +CONFIG_SYS_MALLOC_CLEAR_ON_INIT=y
@@ -222,7 +481,6 @@ index 0000000000..7480b1ea56
 +#
 +# CONFIG_ANDROID_BOOT_IMAGE is not set
 +# CONFIG_FIT is not set
-+CONFIG_IMAGE_FORMAT_LEGACY=y
 +# CONFIG_OF_BOARD_SETUP is not set
 +# CONFIG_OF_SYSTEM_SETUP is not set
 +# CONFIG_OF_STDOUT_VIA_ALIAS is not set
@@ -276,12 +534,10 @@ index 0000000000..7480b1ea56
 +#
 +# CONFIG_LOG is not set
 +# CONFIG_SPL_LOG is not set
-+# CONFIG_SUPPORT_RAW_INITRD is not set
 +CONFIG_DEFAULT_FDT_FILE=""
 +# CONFIG_VERSION_VARIABLE is not set
 +CONFIG_DISPLAY_CPUINFO=y
 +# CONFIG_DISPLAY_BOARDINFO is not set
-+# CONFIG_DISPLAY_BOARDINFO_LATE is not set
 +
 +#
 +# Start-up hooks
@@ -289,17 +545,11 @@ index 0000000000..7480b1ea56
 +CONFIG_ARCH_EARLY_INIT_R=y
 +# CONFIG_ARCH_MISC_INIT is not set
 +# CONFIG_BOARD_EARLY_INIT_F is not set
-+# CONFIG_BOARD_EARLY_INIT_R is not set
-+# CONFIG_LAST_STAGE_INIT is not set
 +
 +#
 +# Security support
 +#
 +CONFIG_HASH=y
-+
-+#
-+# Update support
-+#
 +
 +#
 +# SPL / TPL
@@ -310,9 +560,6 @@ index 0000000000..7480b1ea56
 +#
 +CONFIG_CMDLINE=y
 +# CONFIG_HUSH_PARSER is not set
-+CONFIG_CMDLINE_EDITING=y
-+CONFIG_AUTO_COMPLETE=y
-+CONFIG_SYS_LONGHELP=y
 +CONFIG_SYS_PROMPT="=> "
 +
 +#
@@ -320,6 +567,10 @@ index 0000000000..7480b1ea56
 +#
 +CONFIG_AUTOBOOT=y
 +# CONFIG_AUTOBOOT_KEYED is not set
++
++#
++# FASTBOOT
++#
 +
 +#
 +# Commands
@@ -353,7 +604,6 @@ index 0000000000..7480b1ea56
 +# CONFIG_CMD_IMLS is not set
 +CONFIG_CMD_XIMG=y
 +# CONFIG_CMD_POWEROFF is not set
-+# CONFIG_CMD_FITUPD is not set
 +# CONFIG_CMD_THOR_DOWNLOAD is not set
 +CONFIG_CMD_ZBOOT=y
 +
@@ -373,7 +623,6 @@ index 0000000000..7480b1ea56
 +#
 +# Memory commands
 +#
-+# CONFIG_CMD_BINOP is not set
 +CONFIG_CMD_CRC32=y
 +# CONFIG_CRC32_VERIFY is not set
 +# CONFIG_CMD_EEPROM is not set
@@ -397,13 +646,17 @@ index 0000000000..7480b1ea56
 +# Device access commands
 +#
 +# CONFIG_CMD_ARMFLASH is not set
-+# CONFIG_CMD_ADC is not set
 +# CONFIG_CMD_CLK is not set
 +# CONFIG_CMD_DEMO is not set
 +# CONFIG_CMD_DFU is not set
 +CONFIG_CMD_DM=y
 +# CONFIG_CMD_FDC is not set
 +CONFIG_CMD_FLASH=y
++CONFIG_CMD_FPGA=y
++# CONFIG_CMD_FPGA_LOADBP is not set
++# CONFIG_CMD_FPGA_LOADFS is not set
++CONFIG_CMD_FPGA_LOADMK=y
++# CONFIG_CMD_FPGA_LOADP is not set
 +# CONFIG_CMD_FPGAD is not set
 +# CONFIG_CMD_FUSE is not set
 +# CONFIG_CMD_GPIO is not set
@@ -425,7 +678,6 @@ index 0000000000..7480b1ea56
 +# CONFIG_CMD_READ is not set
 +# CONFIG_CMD_SATA is not set
 +# CONFIG_CMD_SAVES is not set
-+CONFIG_CMD_SCSI=y
 +# CONFIG_CMD_SDRAM is not set
 +# CONFIG_CMD_SF is not set
 +CONFIG_CMD_SF_TEST=y
@@ -443,23 +695,16 @@ index 0000000000..7480b1ea56
 +CONFIG_CMD_ITEST=y
 +CONFIG_CMD_SOURCE=y
 +CONFIG_CMD_SETEXPR=y
++
++#
++# Network commands
++#
 +CONFIG_CMD_NET=y
-+CONFIG_CMD_BOOTP=y
-+# CONFIG_CMD_DHCP is not set
-+CONFIG_BOOTP_BOOTPATH=y
-+CONFIG_BOOTP_DNS=y
-+# CONFIG_BOOTP_DNS2 is not set
-+CONFIG_BOOTP_GATEWAY=y
-+CONFIG_BOOTP_HOSTNAME=y
-+# CONFIG_BOOTP_PREFER_SERVERIP is not set
-+CONFIG_BOOTP_SUBNETMASK=y
-+# CONFIG_BOOTP_NTPSERVER is not set
-+CONFIG_BOOTP_VCI_STRING="U-Boot"
-+CONFIG_CMD_TFTPBOOT=y
 +# CONFIG_CMD_TFTPPUT is not set
 +# CONFIG_CMD_TFTPSRV is not set
-+CONFIG_NET_TFTP_VARS=y
 +# CONFIG_CMD_RARP is not set
++# CONFIG_CMD_DHCP is not set
++# CONFIG_CMD_PXE is not set
 +CONFIG_CMD_NFS=y
 +# CONFIG_CMD_MII is not set
 +# CONFIG_CMD_PING is not set
@@ -468,8 +713,6 @@ index 0000000000..7480b1ea56
 +# CONFIG_CMD_DNS is not set
 +# CONFIG_CMD_LINK_LOCAL is not set
 +# CONFIG_CMD_ETHSW is not set
-+# CONFIG_CMD_PXE is not set
-+# CONFIG_CMD_WOL is not set
 +
 +#
 +# Misc commands
@@ -488,11 +731,6 @@ index 0000000000..7480b1ea56
 +# CONFIG_CMD_QFW is not set
 +# CONFIG_CMD_TERMINAL is not set
 +# CONFIG_CMD_UUID is not set
-+
-+#
-+# TI specific command line interface
-+#
-+# CONFIG_CMD_DDR3 is not set
 +
 +#
 +# Power commands
@@ -523,6 +761,7 @@ index 0000000000..7480b1ea56
 +CONFIG_MTDIDS_DEFAULT=""
 +CONFIG_MTDPARTS_DEFAULT=""
 +# CONFIG_CMD_REISER is not set
++CONFIG_CMD_SCSI=y
 +# CONFIG_CMD_ZFS is not set
 +
 +#
@@ -567,19 +806,20 @@ index 0000000000..7480b1ea56
 +CONFIG_ENV_IS_NOWHERE=y
 +# CONFIG_ENV_IS_IN_EEPROM is not set
 +# CONFIG_ENV_IS_IN_FAT is not set
-+# CONFIG_ENV_IS_IN_EXT4 is not set
 +# CONFIG_ENV_IS_IN_FLASH is not set
++# CONFIG_ENV_IS_IN_MMC is not set
 +# CONFIG_ENV_IS_IN_NAND is not set
 +# CONFIG_ENV_IS_IN_NVRAM is not set
 +# CONFIG_ENV_IS_IN_ONENAND is not set
 +# CONFIG_ENV_IS_IN_REMOTE is not set
 +# CONFIG_ENV_IS_IN_SPI_FLASH is not set
 +# CONFIG_ENV_IS_IN_UBI is not set
-+# CONFIG_USE_DEFAULT_ENV_FILE is not set
-+# CONFIG_ENV_VARS_UBOOT_RUNTIME_CONFIG is not set
 +CONFIG_NET=y
 +# CONFIG_NET_RANDOM_ETHADDR is not set
 +# CONFIG_NETCONSOLE is not set
++CONFIG_NET_TFTP_VARS=y
++CONFIG_BOOTP_PXE_CLIENTARCH=0
++CONFIG_BOOTP_VCI_STRING="U-Boot"
 +
 +#
 +# Device Drivers
@@ -595,7 +835,8 @@ index 0000000000..7480b1ea56
 +CONFIG_DM_STDIO=y
 +CONFIG_DM_SEQ_ALIAS=y
 +# CONFIG_SPL_DM_SEQ_ALIAS is not set
-+# CONFIG_REGMAP is not set
++CONFIG_REGMAP=y
++CONFIG_SYSCON=y
 +# CONFIG_DEVRES is not set
 +CONFIG_SIMPLE_BUS=y
 +CONFIG_OF_TRANSLATE=y
@@ -603,7 +844,6 @@ index 0000000000..7480b1ea56
 +# CONFIG_ADC is not set
 +# CONFIG_ADC_EXYNOS is not set
 +# CONFIG_ADC_SANDBOX is not set
-+# CONFIG_SARADC_MESON is not set
 +# CONFIG_SARADC_ROCKCHIP is not set
 +# CONFIG_SATA is not set
 +CONFIG_LIBATA=y
@@ -622,10 +862,13 @@ index 0000000000..7480b1ea56
 +# CONFIG_SATA_SIL is not set
 +# CONFIG_SATA_SIL3114 is not set
 +CONFIG_BLK=y
-+CONFIG_HAVE_BLOCK_DEVICE=y
 +CONFIG_BLOCK_CACHE=y
 +# CONFIG_IDE is not set
-+# CONFIG_BOOTCOUNT_LIMIT is not set
++
++#
++# Boot count support
++#
++# CONFIG_BOOTCOUNT is not set
 +
 +#
 +# Clock
@@ -656,17 +899,11 @@ index 0000000000..7480b1ea56
 +# CONFIG_TI_EDMA3 is not set
 +
 +#
-+# Fastboot support
-+#
-+# CONFIG_UDP_FUNCTION_FASTBOOT is not set
-+
-+#
 +# FPGA support
 +#
 +# CONFIG_FPGA_ALTERA is not set
 +# CONFIG_FPGA_SOCFPGA is not set
 +# CONFIG_FPGA_XILINX is not set
-+# CONFIG_FPGA_SPARTAN3 is not set
 +
 +#
 +# GPIO Support
@@ -682,17 +919,15 @@ index 0000000000..7480b1ea56
 +# CONFIG_HSDK_CREG_GPIO is not set
 +# CONFIG_LPC32XX_GPIO is not set
 +# CONFIG_MSM_GPIO is not set
-+# CONFIG_MXC_GPIO is not set
 +# CONFIG_CMD_PCA953X is not set
 +# CONFIG_ROCKCHIP_GPIO is not set
-+# CONFIG_XILINX_GPIO is not set
 +# CONFIG_CMD_TCA642X is not set
 +# CONFIG_TEGRA_GPIO is not set
 +# CONFIG_TEGRA186_GPIO is not set
 +# CONFIG_VYBRID_GPIO is not set
 +# CONFIG_DM_74X164 is not set
 +# CONFIG_DM_PCA953X is not set
-+# CONFIG_MPC8XXX_GPIO is not set
++# CONFIG_MPC85XX_GPIO is not set
 +
 +#
 +# I2C support
@@ -701,10 +936,8 @@ index 0000000000..7480b1ea56
 +# CONFIG_DM_I2C_COMPAT is not set
 +# CONFIG_SYS_I2C_DW is not set
 +# CONFIG_SYS_I2C_IMX_LPI2C is not set
-+# CONFIG_SYS_I2C_MXC is not set
-+CONFIG_DM_KEYBOARD=y
++# CONFIG_DM_KEYBOARD is not set
 +# CONFIG_CROS_EC_KEYB is not set
-+CONFIG_I8042_KEYB=y
 +
 +#
 +# LED Support
@@ -733,15 +966,12 @@ index 0000000000..7480b1ea56
 +# CONFIG_PWRSEQ is not set
 +# CONFIG_PCA9551_LED is not set
 +# CONFIG_WINBOND_W83627 is not set
-+CONFIG_ZYNQ_GEM_I2C_MAC_OFFSET=0x0
 +
 +#
 +# MMC Host controller Support
 +#
 +# CONFIG_MMC is not set
-+# CONFIG_MMC_BROKEN_CD is not set
 +CONFIG_DM_MMC=y
-+# CONFIG_FSL_ESDHC is not set
 +
 +#
 +# MTD Support
@@ -753,42 +983,18 @@ index 0000000000..7480b1ea56
 +#
 +# SPI Flash Support
 +#
++CONFIG_DM_SPI_FLASH=y
 +# CONFIG_SPI_FLASH is not set
 +
 +#
 +# UBI support
 +#
-+# CONFIG_CONFIG_UBI_SILENCE_MSG is not set
 +# CONFIG_MTD_UBI is not set
 +# CONFIG_BITBANGMII is not set
 +# CONFIG_MV88E6352_SWITCH is not set
 +# CONFIG_PHYLIB is not set
-+# CONFIG_FSL_PFE is not set
-+CONFIG_DM_ETH=y
-+# CONFIG_DRIVER_TI_CPSW is not set
-+CONFIG_NETDEVICES=y
-+# CONFIG_PHY_GIGE is not set
-+# CONFIG_ALTERA_TSE is not set
-+# CONFIG_BCM_SF2_ETH is not set
-+# CONFIG_DWC_ETH_QOS is not set
-+CONFIG_E1000=y
-+# CONFIG_E1000_SPI_GENERIC is not set
-+# CONFIG_E1000_SPI is not set
-+# CONFIG_CMD_E1000 is not set
-+# CONFIG_ETH_DESIGNWARE is not set
-+# CONFIG_ETHOC is not set
-+# CONFIG_FTMAC100 is not set
-+# CONFIG_MACB is not set
-+# CONFIG_PCH_GBE is not set
-+# CONFIG_RGMII is not set
-+# CONFIG_RTL8139 is not set
-+# CONFIG_RTL8169 is not set
-+# CONFIG_SMC911X is not set
-+# CONFIG_SUN7I_GMAC is not set
-+# CONFIG_SUN4I_EMAC is not set
-+# CONFIG_SUN8I_EMAC is not set
-+# CONFIG_SH_ETHER is not set
-+# CONFIG_TSEC_ENET is not set
++# CONFIG_DM_ETH is not set
++# CONFIG_NETDEVICES is not set
 +# CONFIG_NVME is not set
 +CONFIG_PCI=y
 +CONFIG_DM_PCI=y
@@ -797,7 +1003,6 @@ index 0000000000..7480b1ea56
 +# CONFIG_PCIE_ECAM_GENERIC is not set
 +# CONFIG_PCI_XILINX is not set
 +# CONFIG_PCIE_LAYERSCAPE is not set
-+# CONFIG_PCIE_INTEL_FPGA is not set
 +
 +#
 +# PHY Subsystem
@@ -842,9 +1047,6 @@ index 0000000000..7480b1ea56
 +CONFIG_DM_RTC=y
 +# CONFIG_RTC_PCF2127 is not set
 +# CONFIG_RTC_DS1307 is not set
-+# CONFIG_RTC_ISL1208 is not set
-+# CONFIG_RTC_RX8010SJ is not set
-+# CONFIG_RTC_MV is not set
 +# CONFIG_RTC_S35392A is not set
 +CONFIG_SCSI=y
 +CONFIG_DM_SCSI=y
@@ -854,24 +1056,20 @@ index 0000000000..7480b1ea56
 +#
 +CONFIG_BAUDRATE=115200
 +CONFIG_REQUIRE_SERIAL_CONSOLE=y
-+# CONFIG_SPECIFY_CONSOLE_INDEX is not set
 +CONFIG_SERIAL_PRESENT=y
 +CONFIG_SPL_SERIAL_PRESENT=y
 +CONFIG_DM_SERIAL=y
 +# CONFIG_SERIAL_RX_BUFFER is not set
-+# CONFIG_SERIAL_SEARCH_ALL is not set
++# CONFIG_SPL_DM_SERIAL is not set
 +# CONFIG_TPL_DM_SERIAL is not set
 +# CONFIG_DEBUG_UART_SKIP_INIT is not set
 +# CONFIG_ALTERA_JTAG_UART is not set
 +# CONFIG_ALTERA_UART is not set
-+# CONFIG_ARC_SERIAL is not set
 +# CONFIG_ATMEL_USART is not set
-+# CONFIG_FSL_LINFLEXUART is not set
 +# CONFIG_FSL_LPUART is not set
 +# CONFIG_MVEBU_A3700_UART is not set
 +# CONFIG_NULLDEV_SERIAL is not set
 +CONFIG_SYS_NS16550=y
-+# CONFIG_PL01X_SERIAL is not set
 +# CONFIG_MSM_SERIAL is not set
 +# CONFIG_PXA_SERIAL is not set
 +
@@ -879,7 +1077,30 @@ index 0000000000..7480b1ea56
 +# Sound support
 +#
 +# CONFIG_SOUND is not set
-+# CONFIG_SPI is not set
++
++#
++# SPI Support
++#
++CONFIG_DM_SPI=y
++# CONFIG_ALTERA_SPI is not set
++# CONFIG_CADENCE_QSPI is not set
++# CONFIG_DESIGNWARE_SPI is not set
++# CONFIG_EXYNOS_SPI is not set
++# CONFIG_FSL_DSPI is not set
++# CONFIG_ICH_SPI is not set
++# CONFIG_MVEBU_A3700_SPI is not set
++# CONFIG_ROCKCHIP_SPI is not set
++# CONFIG_TEGRA114_SPI is not set
++# CONFIG_TEGRA20_SFLASH is not set
++# CONFIG_TEGRA20_SLINK is not set
++# CONFIG_TEGRA210_QSPI is not set
++# CONFIG_XILINX_SPI is not set
++# CONFIG_SOFT_SPI is not set
++# CONFIG_FSL_ESPI is not set
++# CONFIG_FSL_QSPI is not set
++# CONFIG_ATCSPI200_SPI is not set
++# CONFIG_TI_QSPI is not set
++# CONFIG_OMAP3_SPI is not set
 +
 +#
 +# SPMI support
@@ -901,76 +1122,17 @@ index 0000000000..7480b1ea56
 +# CONFIG_TIMER_EARLY is not set
 +# CONFIG_ALTERA_TIMER is not set
 +# CONFIG_ATMEL_PIT_TIMER is not set
-+# CONFIG_CADENCE_TTC_TIMER is not set
 +CONFIG_X86_TSC_TIMER=y
 +# CONFIG_OMAP_TIMER is not set
 +# CONFIG_AST_TIMER is not set
 +# CONFIG_STI_TIMER is not set
 +# CONFIG_ATCPIT100_TIMER is not set
 +# CONFIG_ROCKCHIP_TIMER is not set
-+# CONFIG_STM32_TIMER is not set
 +
 +#
 +# TPM support
 +#
-+CONFIG_USB=y
-+CONFIG_DM_USB=y
-+
-+#
-+# USB Host Controller Drivers
-+#
-+CONFIG_USB_HOST=y
-+# CONFIG_USB_XHCI_HCD is not set
-+CONFIG_USB_EHCI_HCD=y
-+# CONFIG_USB_EHCI_MSM is not set
-+CONFIG_USB_EHCI_PCI=y
-+# CONFIG_USB_EHCI_GENERIC is not set
-+# CONFIG_USB_EHCI_FSL is not set
-+# CONFIG_USB_OHCI_HCD is not set
-+# CONFIG_USB_UHCI_HCD is not set
-+# CONFIG_USB_DWC2 is not set
-+# CONFIG_USB_DWC3 is not set
-+
-+#
-+# Legacy MUSB Support
-+#
-+# CONFIG_USB_MUSB_HCD is not set
-+# CONFIG_USB_MUSB_UDC is not set
-+# CONFIG_USB_DAVINCI is not set
-+
-+#
-+# MUSB Controller Driver
-+#
-+# CONFIG_USB_MUSB_HOST is not set
-+# CONFIG_USB_MUSB_GADGET is not set
-+# CONFIG_USB_MUSB_TI is not set
-+# CONFIG_USB_MUSB_AM35X is not set
-+# CONFIG_USB_MUSB_DSPS is not set
-+# CONFIG_USB_MUSB_PIO_ONLY is not set
-+
-+#
-+# USB Phy
-+#
-+# CONFIG_TWL4030_USB is not set
-+# CONFIG_OMAP_USB_PHY is not set
-+# CONFIG_ROCKCHIP_USB2_PHY is not set
-+
-+#
-+# ULPI drivers
-+#
-+
-+#
-+# USB peripherals
-+#
-+# CONFIG_USB_STORAGE is not set
-+# CONFIG_USB_KEYBOARD is not set
-+# CONFIG_USB_GADGET is not set
-+CONFIG_USB_HOST_ETHER=y
-+CONFIG_USB_ETHER_ASIX=y
-+# CONFIG_USB_ETHER_ASIX88179 is not set
-+# CONFIG_USB_ETHER_MCS7830 is not set
-+# CONFIG_USB_ETHER_RTL8152 is not set
-+CONFIG_USB_ETHER_SMSC95XX=y
++# CONFIG_USB is not set
 +
 +#
 +# Graphics support
@@ -1013,7 +1175,6 @@ index 0000000000..7480b1ea56
 +#
 +# Watchdog Timer Support
 +#
-+# CONFIG_WATCHDOG is not set
 +# CONFIG_BCM2835_WDT is not set
 +# CONFIG_ULP_WATCHDOG is not set
 +# CONFIG_WDT is not set
@@ -1024,10 +1185,8 @@ index 0000000000..7480b1ea56
 +#
 +# CONFIG_FS_BTRFS is not set
 +# CONFIG_FS_CBFS is not set
-+# CONFIG_FS_EXT4 is not set
 +# CONFIG_FS_FAT is not set
 +# CONFIG_FS_JFFS2 is not set
-+# CONFIG_UBIFS_SILENCE_MSG is not set
 +# CONFIG_FS_CRAMFS is not set
 +# CONFIG_YAFFS2 is not set
 +
@@ -1036,17 +1195,13 @@ index 0000000000..7480b1ea56
 +#
 +# CONFIG_BCH is not set
 +# CONFIG_CC_OPTIMIZE_LIBS_FOR_SPEED is not set
-+# CONFIG_DYNAMIC_CRC_TABLE is not set
 +CONFIG_HAVE_PRIVATE_LIBGCC=y
-+CONFIG_LIB_UUID=y
-+CONFIG_PRINTF=y
-+CONFIG_SPRINTF=y
-+CONFIG_STRTO=y
 +CONFIG_USE_PRIVATE_LIBGCC=y
 +CONFIG_SYS_HZ=1000
 +# CONFIG_USE_TINY_PRINTF is not set
 +# CONFIG_PANIC_HANG is not set
 +CONFIG_REGEX=y
++# CONFIG_LIB_RAND is not set
 +# CONFIG_SPL_TINY_MEMSET is not set
 +# CONFIG_TPL_TINY_MEMSET is not set
 +# CONFIG_BITREVERSE is not set
@@ -1058,10 +1213,6 @@ index 0000000000..7480b1ea56
 +# CONFIG_AES is not set
 +# CONFIG_RSA is not set
 +# CONFIG_TPM is not set
-+
-+#
-+# Android Verified Boot
-+#
 +
 +#
 +# Hashing Support
@@ -1079,7 +1230,6 @@ index 0000000000..7480b1ea56
 +# CONFIG_SPL_LZO is not set
 +# CONFIG_SPL_GZIP is not set
 +# CONFIG_ERRNO_STR is not set
-+# CONFIG_HEXDUMP is not set
 +CONFIG_OF_LIBFDT=y
 +# CONFIG_OF_LIBFDT_OVERLAY is not set
 +# CONFIG_SPL_OF_LIBFDT is not set
@@ -1092,9 +1242,6 @@ index 0000000000..7480b1ea56
 +CONFIG_SMBIOS_MANUFACTURER="emulation"
 +# CONFIG_EFI is not set
 +CONFIG_EFI_LOADER=y
-+# CONFIG_OPTEE is not set
-+CONFIG_OPTEE_LOAD_ADDR=0x00000000
-+# CONFIG_BOOTM_OPTEE is not set
 +# CONFIG_UNIT_TEST is not set
 diff --git a/include/configs/microsoft-xbox.h b/include/configs/microsoft-xbox.h
 new file mode 100644

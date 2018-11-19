@@ -1,33 +1,43 @@
-From ff5cf06b6b210281417c8ad0f8e1500853325e95 Mon Sep 17 00:00:00 2001
+From 830983df63426a0aec1b2dc24458c83c235323a8 Mon Sep 17 00:00:00 2001
 From: Thomas Epperson <thomas.epperson@gmail.com>
 Date: Fri, 9 Nov 2018 18:36:29 -0500
 Subject: [PATCH] Add support for the original microsoft xbox
 
 ---
- arch/x86/Kconfig                 |   4 +
- arch/x86/dts/xbox.dts            |  15 +
- board/microsoft/Kconfig          |  18 +
- board/microsoft/xbox/Kconfig     |  15 +
- board/microsoft/xbox/MAINTAINERS |   3 +
- board/microsoft/xbox/Makefile    |  10 +
- board/microsoft/xbox/car.S       |  10 +
- board/microsoft/xbox/cpu.c       |  46 ++
- board/microsoft/xbox/dram.c      |  35 ++
- board/microsoft/xbox/e820.c      |  45 ++
- board/microsoft/xbox/start.S     |   9 +
- board/microsoft/xbox/xbox.c      |  47 ++
- configs/microsoft-xbox_defconfig | 863 +++++++++++++++++++++++++++++++
- include/configs/microsoft-xbox.h |  31 ++
- 14 files changed, 1151 insertions(+)
+ arch/x86/Kconfig                           |   4 +
+ arch/x86/cpu/start.S                       |   3 +
+ arch/x86/cpu/u-boot.lds                    |   4 +-
+ arch/x86/dts/xbox.dts                      |  15 +
+ board/microsoft/Kconfig                    |  18 +
+ board/microsoft/xbox/2bPicResponseAction.c | 155 ++++
+ board/microsoft/xbox/2bconsts.h            |  71 ++
+ board/microsoft/xbox/2bload.h              |  53 ++
+ board/microsoft/xbox/Kconfig               |  15 +
+ board/microsoft/xbox/MAINTAINERS           |   3 +
+ board/microsoft/xbox/Makefile              |  12 +
+ board/microsoft/xbox/Xcodes.h              | 294 +++++++
+ board/microsoft/xbox/boot-sector.S         |  34 +
+ board/microsoft/xbox/boot.S                | 221 ++++++
+ board/microsoft/xbox/car.S                 |  10 +
+ board/microsoft/xbox/dram.c                |  35 +
+ board/microsoft/xbox/start.S               |  30 +
+ board/microsoft/xbox/xbox.c                | 101 +++
+ configs/microsoft-xbox_defconfig           | 863 +++++++++++++++++++++
+ include/configs/microsoft-xbox.h           |  31 +
+ 20 files changed, 1971 insertions(+), 1 deletion(-)
  create mode 100644 arch/x86/dts/xbox.dts
  create mode 100644 board/microsoft/Kconfig
+ create mode 100644 board/microsoft/xbox/2bPicResponseAction.c
+ create mode 100644 board/microsoft/xbox/2bconsts.h
+ create mode 100644 board/microsoft/xbox/2bload.h
  create mode 100644 board/microsoft/xbox/Kconfig
  create mode 100644 board/microsoft/xbox/MAINTAINERS
  create mode 100644 board/microsoft/xbox/Makefile
+ create mode 100644 board/microsoft/xbox/Xcodes.h
+ create mode 100644 board/microsoft/xbox/boot-sector.S
+ create mode 100644 board/microsoft/xbox/boot.S
  create mode 100644 board/microsoft/xbox/car.S
- create mode 100644 board/microsoft/xbox/cpu.c
  create mode 100644 board/microsoft/xbox/dram.c
- create mode 100644 board/microsoft/xbox/e820.c
  create mode 100644 board/microsoft/xbox/start.S
  create mode 100644 board/microsoft/xbox/xbox.c
  create mode 100644 configs/microsoft-xbox_defconfig
@@ -55,6 +65,33 @@ index 5c23b2cb57..d8c461bff8 100644
  
  # platform-specific options below
  source "arch/x86/cpu/baytrail/Kconfig"
+diff --git a/arch/x86/cpu/start.S b/arch/x86/cpu/start.S
+index 8de55a0af1..ed5b0e101f 100644
+--- a/arch/x86/cpu/start.S
++++ b/arch/x86/cpu/start.S
+@@ -24,6 +24,9 @@
+ .type _start, @function
+ .globl _x86boot_start
+ _x86boot_start:
++#ifdef CONFIG_TARGET_XBOX
++#include "../board/microsoft/xbox/boot.S"
++#endif
+ 	/*
+ 	 * This is the fail-safe 32-bit bootstrap entry point.
+ 	 *
+diff --git a/arch/x86/cpu/u-boot.lds b/arch/x86/cpu/u-boot.lds
+index 186718d8f9..acfb53b192 100644
+--- a/arch/x86/cpu/u-boot.lds
++++ b/arch/x86/cpu/u-boot.lds
+@@ -118,5 +118,7 @@ SECTIONS
+ 		KEEP(*(.resetvec));
+ 	}
+ #endif
+-
++#ifdef CONFIG_TARGET_XBOX
++	.decoy_boot : AT (CONFIG_SYS_TEXT_BASE + 0x3fe00) { KEEP(*(.decoy_boot*)) }
++#endif
+ }
 diff --git a/arch/x86/dts/xbox.dts b/arch/x86/dts/xbox.dts
 new file mode 100644
 index 0000000000..bb94b9a138
@@ -100,9 +137,306 @@ index 0000000000..083569500f
 +source "board/microsoft/xbox/Kconfig"
 +
 +endif
+diff --git a/board/microsoft/xbox/2bPicResponseAction.c b/board/microsoft/xbox/2bPicResponseAction.c
+new file mode 100644
+index 0000000000..6aa3c6e26e
+--- /dev/null
++++ b/board/microsoft/xbox/2bPicResponseAction.c
+@@ -0,0 +1,155 @@
++/*
++ * I2C-related code
++ * AG 2002-07-27
++ */
++
++ /***************************************************************************
++ *                                                                         *
++ *   This program is free software; you can redistribute it and/or modify  *
++ *   it under the terms of the GNU General Public License as published by  *
++ *   the Free Software Foundation; either version 2 of the License, or     *
++ *   (at your option) any later version.                                   *
++ *                                                                         *
++ ***************************************************************************/
++
++#include <asm/io.h>
++
++#include "2bload.h"
++
++
++// ----------------------------  I2C -----------------------------------------------------------
++//
++// get a value from a given device address
++// errors will have b31 set, ie, will be negative, otherwise fetched byte in LSB of return
++
++int I2CTransmitByteGetReturn(uint8_t bPicAddressI2cFormat, uint8_t bDataToWrite)
++{
++	int nRetriesToLive=400;
++
++	//if(readw(I2C_IO_BASE+0)&0x8000) {  }
++	while(readw(I2C_IO_BASE+0)&0x0800) ;  // Franz's spin while bus busy with any master traffic
++
++	while(nRetriesToLive--) {
++
++		writeb(I2C_IO_BASE+4, (bPicAddressI2cFormat<<1)|1);
++		writeb(I2C_IO_BASE+8, bDataToWrite);
++		writew(I2C_IO_BASE+0, 0xffff); // clear down all preexisting errors
++		writeb(I2C_IO_BASE+2, 0x0a);
++
++		{
++			uint8_t b=0x0;
++			while( (b&0x36)==0 ) { b=readb(I2C_IO_BASE+0); }
++
++			if(b&0x24) {
++				//bprintf("I2CTransmitByteGetReturn error %x\n", b);
++			}
++			if(!(b&0x10)) {
++				//bprintf("I2CTransmitByteGetReturn no complete, retry\n");
++			} else {
++				return (int)readb(I2C_IO_BASE+6);
++			}
++		}
++	}
++
++	return ERR_I2C_ERROR_BUS;
++}
++
++// transmit a word, no returned data from I2C device
++
++int I2CTransmitWord(uint8_t bPicAddressI2cFormat, u16 wDataToWrite)
++{
++	int nRetriesToLive=400;
++
++	while(readw(I2C_IO_BASE+0)&0x0800) ;  // Franz's spin while bus busy with any master traffic
++
++	while(nRetriesToLive--) {
++		writeb(I2C_IO_BASE+4, (bPicAddressI2cFormat<<1)|0);
++
++		writeb(I2C_IO_BASE+8, (uint8_t)(wDataToWrite>>8));
++		writeb(I2C_IO_BASE+6, (uint8_t)wDataToWrite);
++		writew(I2C_IO_BASE+0, 0xffff);  // clear down all preexisting errors
++		writeb(I2C_IO_BASE+2, 0x1a);
++
++		{
++			uint8_t b=0x0;
++			while( (b&0x36)==0 ) { b=readb(I2C_IO_BASE+0); }
++
++			if(b&0x24) {
++				//bprintf("I2CTransmitWord error %x\n", b);
++			}
++			if(!(b&0x10)) {
++				//bprintf("I2CTransmitWord no complete, retry\n");
++			} else {
++				return ERR_SUCCESS;
++			}
++		}
++	}
++	return ERR_I2C_ERROR_BUS;
++}
++
++// ----------------------------  PIC challenge/response -----------------------------------------------------------
++//
++// given four bytes, returns a u16
++// LSB of return is the 'first' byte, MSB is the 'second' response byte
++
++u16 BootPicManipulation(
++	uint8_t bC,
++	uint8_t  bD,
++	uint8_t  bE,
++	uint8_t  bF
++) {
++	int n=4;
++	uint8_t
++		b1 = 0x33,
++		b2 = 0xed,
++		b3 = ((bC<<2) ^ (bD +0x39) ^ (bE >>2) ^ (bF +0x63)),
++		b4 = ((bC+0x0b) ^ (bD>>2) ^ (bE +0x1b))
++	;
++
++	while(n--) {
++		b1 += b2 ^ b3;
++		b2 += b1 ^ b4;
++	}
++
++	return (u16) ((((u16)b2)<<8) | b1);
++}
++
++// actual business of getting I2C data from PIC and reissuing munged version
++// returns zero if all okay, else error code
++
++int BootPerformPicChallengeResponseAction()
++{
++	uint8_t bC, bD, bE, bF;
++	int n;
++
++	n=I2CTransmitByteGetReturn( 0x10, 0x1c );
++	if(n<0) return n;
++	bC=n;
++	n=I2CTransmitByteGetReturn( 0x10, 0x1d );
++	if(n<0) return n;
++	bD=n;
++	n=I2CTransmitByteGetReturn( 0x10, 0x1e );
++	if(n<0) return n;
++	bE=n;
++	n=I2CTransmitByteGetReturn( 0x10, 0x1f );
++	if(n<0) return n;
++	bF=n;
++
++	{
++		u16 w=BootPicManipulation(bC, bD, bE, bF);
++
++		I2CTransmitWord( 0x10, 0x2000 | (w&0xff));
++		I2CTransmitWord( 0x10, 0x2100 | (w>>8) );
++	}
++
++	// continues as part of video setup....
++	return ERR_SUCCESS;
++}
++
++extern int I2cSetFrontpanelLed(uint8_t b)
++{
++	I2CTransmitWord( 0x10, 0x800 | b);  // sequencing thanks to Jarin the Penguin!
++	I2CTransmitWord( 0x10, 0x701);
++	return ERR_SUCCESS;
++}
++
+diff --git a/board/microsoft/xbox/2bconsts.h b/board/microsoft/xbox/2bconsts.h
+new file mode 100644
+index 0000000000..763f6a71e6
+--- /dev/null
++++ b/board/microsoft/xbox/2bconsts.h
+@@ -0,0 +1,71 @@
++/*
++ *
++ * includes for startup code in a form usable by the .S files
++ *
++ */
++
++  /***************************************************************************
++ *                                                                         *
++ *   This program is free software; you can redistribute it and/or modify  *
++ *   it under the terms of the GNU General Public License as published by  *
++ *   the Free Software Foundation; either version 2 of the License, or     *
++ *   (at your option) any later version.                                   *
++ *                                                                         *
++ ***************************************************************************/
++
++#define PCI_CFG_ADDR 0x0CF8
++#define PCI_CFG_DATA 0x0CFC
++
++#define MTRR_DEF 0x2ff
++#define MTRR_DEF_TYPE 0x800
++#define MTRR_PHYSBASE 0x200
++#define MTRR_LAST 0x20F
++#define WB_CACHE 6
++#define BASE0_H 0
++#define BASE0_L WB_CACHE
++#define MASK0_H 0x0F
++#define MASK0_L 0xFC000800
++#define BASE1_H 0
++#define BASE1_L 0xFFF80005
++#define MASK1_H 0x0F
++#define MASK1_L 0x0FFF80800
++
++#define I2C_IO_BASE 0xc000
++
++#define BUS_0 0
++#define BUS_1 1
++
++#define DEV_0 0
++#define DEV_1 1
++#define DEV_2 2
++#define DEV_3 3
++#define DEV_4 4
++#define DEV_5 5
++#define DEV_6 6
++#define DEV_7 7
++#define DEV_8 8
++#define DEV_9 9
++#define DEV_a 0xa
++#define DEV_b 0xb
++#define DEV_c 0xc
++#define DEV_d 0xd
++#define DEV_e 0xe
++#define DEV_f 0xf
++#define DEV_10 0x10
++#define DEV_11 0x11
++#define DEV_12 0x12
++#define DEV_13 0x13
++#define DEV_14 0x14
++#define DEV_15 0x15
++#define DEV_16 0x16
++#define DEV_17 0x17
++#define DEV_18 0x18
++#define DEV_19 0x19
++#define DEV_1a 0x1a
++#define DEV_1b 0x1b
++#define DEV_1c 0x1c
++#define DEV_1d 0x1d
++#define DEV_1e 0x1e
++#define DEV_1f 0x1f
++
++#define FUNC_0 0
+diff --git a/board/microsoft/xbox/2bload.h b/board/microsoft/xbox/2bload.h
+new file mode 100644
+index 0000000000..5b42175ad9
+--- /dev/null
++++ b/board/microsoft/xbox/2bload.h
+@@ -0,0 +1,53 @@
++/***************************************************************************
++      Includes used by XBox boot code
++ ***************************************************************************/
++/***************************************************************************
++ *                                                                         *
++ *   This program is free software; you can redistribute it and/or modify  *
++ *   it under the terms of the GNU General Public License as published by  *
++ *   the Free Software Foundation; either version 2 of the License, or     *
++ *   (at your option) any later version.                                   *
++ *                                                                         *
++ ***************************************************************************/
++
++typedef unsigned int size_t;
++
++#include "2bconsts.h"
++
++/////////////////////////////////
++// LED-flashing codes
++// or these together as argument to I2cSetFrontpanelLed
++
++enum {
++	I2C_LED_RED0 = 0x80,
++	I2C_LED_RED1 = 0x40,
++	I2C_LED_RED2 = 0x20,
++	I2C_LED_RED3 = 0x10,
++	I2C_LED_GREEN0 = 0x08,
++	I2C_LED_GREEN1 = 0x04,
++	I2C_LED_GREEN2 = 0x02,
++	I2C_LED_GREEN3 = 0x01
++};
++
++///////////////////////////////
++/* BIOS-wide error codes		all have b31 set  */
++
++enum {
++	ERR_SUCCESS = 0,  // completed without error
++
++	ERR_I2C_ERROR_TIMEOUT = 0x80000001,  // I2C action failed because it did not complete in a reasonable time
++	ERR_I2C_ERROR_BUS = 0x80000002, // I2C action failed due to non retryable bus error
++
++	ERR_BOOT_PIC_ALG_BROKEN = 0x80000101 // PIC algorithm did not pass its self-test
++};
++
++// boot process
++int BootPerformPicChallengeResponseAction(void);
++// LED control (see associated enum above)
++int I2cSetFrontpanelLed(uint8_t b);
++
++///////// BootPerformPicChallengeResponseAction.c
++
++int I2CTransmitWord(uint8_t bPicAddressI2cFormat, uint16_t wDataToWrite);
++int I2CTransmitByteGetReturn(uint8_t bPicAddressI2cFormat, uint8_t bDataToWrite);
++
 diff --git a/board/microsoft/xbox/Kconfig b/board/microsoft/xbox/Kconfig
 new file mode 100644
-index 0000000000..e265479ee9
+index 0000000000..f03e20f65d
 --- /dev/null
 +++ b/board/microsoft/xbox/Kconfig
 @@ -0,0 +1,15 @@
@@ -115,11 +449,11 @@ index 0000000000..e265479ee9
 +
 +	config SYS_CAR_ADDR
 +		hex
-+		default 0xff7e0000
++		default 0x1dfff0
 +
 +	config SYS_CAR_SIZE
 +		hex
-+		default 0x20000
++		default 0x20004
 +endif
 diff --git a/board/microsoft/xbox/MAINTAINERS b/board/microsoft/xbox/MAINTAINERS
 new file mode 100644
@@ -132,10 +466,10 @@ index 0000000000..ba63c447cc
 +S:	Maintained
 diff --git a/board/microsoft/xbox/Makefile b/board/microsoft/xbox/Makefile
 new file mode 100644
-index 0000000000..159ed0f037
+index 0000000000..e00968da69
 --- /dev/null
 +++ b/board/microsoft/xbox/Makefile
-@@ -0,0 +1,10 @@
+@@ -0,0 +1,12 @@
 +# SPDX-License-Identifier: GPL-2.0+
 +#
 +# (C) Copyright 2001-2006
@@ -146,6 +480,575 @@ index 0000000000..159ed0f037
 +obj-y	+= start.o
 +obj-y	+= car.o
 +obj-y	+= dram.o
++obj-y	+= 2bPicResponseAction.o
++obj-y	+= boot-sector.o
+diff --git a/board/microsoft/xbox/Xcodes.h b/board/microsoft/xbox/Xcodes.h
+new file mode 100644
+index 0000000000..ff37e7ded3
+--- /dev/null
++++ b/board/microsoft/xbox/Xcodes.h
+@@ -0,0 +1,294 @@
++/*
++ *
++ *  BIOS ROM Startup Assembler
++ *  (C)2002 Andy, Michael, Paul, Steve
++ * Original top and bottom ROM code by Steve from an idea by Michael
++ * -- NOTE: Comment removed, the top / bottom Code changed to turnaround code.
++ */
++
++/***************************************************************************
++ *                                                                         *
++ *   This program is free software; you can redistribute it and/or modify  *
++ *   it under the terms of the GNU General Public License as published by  *
++ *   the Free Software Foundation; either version 2 of the License, or     *
++ *   (at your option) any later version.                                   *
++ *                                                                         *
++ ***************************************************************************/
++/* 
++	Rewritten from Original .bin linking to compiler system by Lehner Franz (franz@caos.at) 
++	Rewritten to Dual Boot concept for 2BL loading
++	New written CPU Inits by Lehner Franz (franz@caos.at) 
++	Written New Working Xcodes + Xcode compiler by Lehner Franz (franz@caos.at) 
++	Focus support by Lehner Franz (franz@caos.at) 
++	Xcalibur support by Lehner Franz (franz@caos.at) 
++*/
++ 
++	//The bytecode interpreter begins here
++	xcode_pciout(0x80000884, 0x00008001);
++	xcode_pciout(0x80000810, 0x00008001);	
++	xcode_pciout(0x80000804, 0x00000003);
++	xcode_outb(0x00008049, 0x00000008);
++	xcode_outb(0x000080d9, 0x00000000);
++	xcode_outb(0x00008026, 0x00000001);
++	xcode_pciout(0x8000f04c, 0x00000001);
++	xcode_pciout(0x8000f018, 0x00010100);
++	xcode_pciout(0x80000084, 0x07ffffff);
++	
++	xcode_pciout(0x8000f020, 0x0ff00f00);
++	xcode_pciout(0x8000f024, 0xf7f0f000);
++	xcode_pciout(0x80010010, 0x0f000000);
++	xcode_pciout(0x80010014, 0xf0000000);
++	xcode_pciout(0x80010004, 0x00000007);
++	xcode_pciout(0x8000f004, 0x00000007);
++
++#ifndef MCPXREVD5
++	xcode_poke(0x0f0010b0, 0x07633461);
++#else
++	xcode_poke(0x0f0010b0, 0x01000010);
++#endif
++
++	xcode_poke(0x0f0010cc, 0x66660000);
++
++	xcode_peek(0x0f101000);
++	
++	xcode_bittoggle(0x000c0000,0x00000000);
++
++	xcode_ifgoto(0x00000000,6);
++	
++	xcode_peek(0x0f101000);
++	
++	xcode_bittoggle(0xe1f3ffff,0x80000000);
++
++	
++	xcode_poke_a(0x0f101000);
++	xcode_poke(0x0f0010b8, 0xeeee0000);
++	xcode_goto(11);
++	
++	xcode_ifgoto(0x000c0000,6);
++
++	xcode_peek(0x0f101000);
++	xcode_bittoggle(0xe1f3ffff,0x860c0000);
++	xcode_poke_a(0x0f101000);
++	
++	xcode_poke(0x0f0010b8, 0xffff0000);
++        xcode_goto(5);
++	xcode_peek(0x0f101000);
++	
++	xcode_bittoggle(0xe1f3ffff,0x820c0000);
++	xcode_poke_a(0x0f101000);
++	xcode_poke(0x0f0010b8, 0x11110000);
++	xcode_poke(0x0f0010d4, 0x00000009);
++	xcode_poke(0x0f0010b4, 0x00000000);
++	xcode_poke(0x0f0010bc, 0x00005866);
++	xcode_poke(0x0f0010c4, 0x0351c858);
++	xcode_poke(0x0f0010c8, 0x30007d67);
++	xcode_poke(0x0f0010d8, 0x00000000);
++	xcode_poke(0x0f0010dc, 0xa0423635);
++	xcode_poke(0x0f0010e8, 0x0c6558c6);
++	xcode_poke(0x0f100200, 0x03070103);
++	xcode_poke(0x0f100410, 0x11000016);
++	xcode_poke(0x0f100330, 0x84848888);
++	xcode_poke(0x0f10032c, 0xffffcfff);
++	xcode_poke(0x0f100328, 0x00000001);
++	xcode_poke(0x0f100338, 0x000000df);
++	
++	// Set up the SM - bus controller
++	xcode_pciout(0x80000904, 0x00000001);
++	xcode_pciout(0x80000914, 0x0000c001);
++	xcode_pciout(0x80000918, 0x0000c201);
++	xcode_outb(0x0000c200, 0x00000070);
++	
++	
++	//VIDEO INIT CODE
++	/* It is necessary to write to the video encoder, as the PIC
++	snoops the I2C traffic and will reset us if it doesn't see what 
++	it judges as 'appropriate' traffic.  Conexant is the most urgent,
++	as on 1.0 Xboxes, the PIC was very strict and reset us earlier
++	than later models 
++	*/
++
++	//CONEXANT START
++	//Set conexant address
++	xcode_outb(0x0000c004, 0x0000008a);
++	xcode_outb(SMBUS+8, 0x000000ba);
++	xcode_outb(SMBUS+6, 0x0000003f);
++	xcode_outb(SMBUS+2, 0x0000000a);
++				
++	xcode_inb(SMBUS);
++	xcode_ifgoto(0x00000010,2); //Write failed, forward 2
++	xcode_goto(4); //Success, skip to next conexant write.
++	xcode_bittoggle(0x00000008, 0x00000000); //Check fail status
++	xcode_ifgoto(0x00000000,-4); //No result yet, read again.
++	xcode_goto(39);	//Write failed, on to Focus
++	xcode_outb(SMBUS, 0x00000010); //Next conexant write.
++	//I2CTransmitWord(0x45,0x6c46);
++	SMB_xcode_Write(0x6c,0x46);		// +6
++
++	//Are these REALLY needed to keep the PIC happy?
++	//I2CTransmitWord(0x45,0xb800);
++	SMB_xcode_Write(0xb8,0x00);		// +6
++	//I2CTransmitWord(0x45,0xce19);
++	SMB_xcode_Write(0xce,0x19);		// +6
++	//I2CTransmitWord(0x45,0xc69c);
++	SMB_xcode_Write(0xc6,0x9c);		// +6
++	//I2CTransmitWord(0x45,0x3208);
++	SMB_xcode_Write(0x32,0x08);		// +6
++	//I2CTransmitWord(0x45,0xc401);
++	SMB_xcode_Write(0xc4,0x01);		// +6
++
++	xcode_goto(36); //Video complete -> VIDEND 
++
++
++	//FOCUS START
++	//Clear the error from the previous attempts
++	xcode_outb(SMBUS, 0x000000ff);
++	xcode_outb(SMBUS, 0x00000010);
++	
++	//Set focus address
++	xcode_outb(0x0000c004, 0x000000d4);
++	//I2CTransmitWord(0x6a,0x0c00);
++	xcode_outb(SMBUS+8, 0x0000000c);
++	xcode_outb(SMBUS+6, 0x00000000);
++	xcode_outb(SMBUS+2, 0x0000000a);
++        xcode_inb(SMBUS);
++	xcode_ifgoto(0x00000010,2); //Write failed, forward 2
++	xcode_goto(4); //Success, skip to next focus write.
++	xcode_bittoggle(0x00000008, 0x00000000); //Check fail status
++	xcode_ifgoto(0x00000000,-4); //No result yet, read again.
++	xcode_goto(9);	//Write failed, on to Xcalibur
++	xcode_outb(SMBUS, 0x00000010); //Next focus write.
++	//I2CTransmitWord(0x6a,0x0d20);
++	SMB_xcode_Write(0x0d,0x20);	 
++	xcode_goto(16); //video complete -> VIDEND
++
++	//XCALIBUR START	
++	/* We don't check to see if these writes fail, as
++	we've already tried Conexant and Focus - Oh dear,
++	not another encoder...  :(    
++	*/
++
++	//Clear the error from the previous attempts
++	xcode_outb(SMBUS, 0x000000ff);
++	xcode_outb(SMBUS, 0x00000010);
++	
++	xcode_outb(0x0000c004, 0x000000E0);
++	//I2CTransmitWord(0x70,0x00);
++	SMB_xcode_Write(0x0,0x0);		// +6
++	//I2CTransmitWord(0x70,0x00);
++	SMB_xcode_Write(0xb8,0x00);		// +6	
++
++	
++	//VIDEND - Encoder 'init' complete.
++
++        // PIC SLAVE Address (Write)
++	xcode_outb(SMBUS+4, 0x00000020);
++        // I2Ctransmit(0x20,0x1,0x0);
++	SMB_xcode_Write(0x01,0x00);		// +6
++
++	// PIC SLAVE Address (Read)
++	xcode_outb(SMBUS+4, 0x00000021);
++
++	// I2Cgetbyte(0x8a,0x1);
++	xcode_outb(SMBUS+8, 0x00000001);
++	xcode_outb(SMBUS+2, 0x0000000a);
++        xcode_inb(SMBUS);
++        xcode_ifgoto(0x00000010,-1)
++        xcode_outb(SMBUS, 0x00000010);
++
++
++	// If SMC version does not match ... ?????
++	xcode_inb(SMBUS+6);
++	
++	xcode_poke(0x0f680500, 0x00011c01);
++	xcode_poke(0x0f68050c, 0x000a0400);
++	xcode_poke(0x0f001220, 0x00000000);
++	xcode_poke(0x0f001228, 0x00000000);
++	xcode_poke(0x0f001264, 0x00000000);
++	xcode_poke(0x0f001210, 0x00000010);
++	xcode_peek(0x0f101000);
++	xcode_bittoggle(0x06000000,0x00000000);
++	xcode_ifgoto(0x00000000,4);
++	xcode_poke(0x0f001214, 0x48480848);
++	xcode_poke(0x0f00122c, 0x88888888);
++	xcode_goto(7);
++	xcode_ifgoto(0x06000000,4);
++	xcode_poke(0x0f001214, 0x09090909);
++	xcode_poke(0x0f00122c, 0xaaaaaaaa);
++	xcode_goto(3);
++     
++	xcode_poke(0x0f001214, 0x09090909);
++	xcode_poke(0x0f00122c, 0xaaaaaaaa);
++	xcode_poke(0x0f001230, 0xffffffff);
++	xcode_poke(0x0f001234, 0xaaaaaaaa);
++	xcode_poke(0x0f001238, 0xaaaaaaaa);
++	xcode_poke(0x0f00123c, 0x8b8b8b8b);
++	xcode_poke(0x0f001240, 0xffffffff);
++	xcode_poke(0x0f001244, 0x8b8b8b8b);
++	xcode_poke(0x0f001248, 0x8b8b8b8b);
++	xcode_poke(0x0f1002d4, 0x00000001);
++	xcode_poke(0x0f1002c4, 0x00100042);
++	xcode_poke(0x0f1002cc, 0x00100042);
++	xcode_poke(0x0f1002c0, 0x00000011);
++	xcode_poke(0x0f1002c8, 0x00000011);
++	xcode_poke(0x0f1002c0, 0x00000032);
++	xcode_poke(0x0f1002c8, 0x00000032);
++	xcode_poke(0x0f1002c0, 0x00000132);
++	xcode_poke(0x0f1002c8, 0x00000132);
++	xcode_poke(0x0f1002d0, 0x00000001);
++	xcode_poke(0x0f1002d0, 0x00000001);
++	xcode_poke(0x0f100210, 0x80000000);
++	xcode_poke(0x0f00124c, 0xaa8baa8b);
++	xcode_poke(0x0f001250, 0x0000aa8b);
++	xcode_poke(0x0f100228, 0x081205ff);
++
++	xcode_poke(0x0f001218, 0x00010000);
++
++
++	xcode_pciin_a(0x80000860);
++	xcode_bittoggle(0xffffffff,0x00000400);   
++	xcode_pciout_a(0x80000860);
++
++	xcode_pciout(0x8000084c, 0x0000fdde);
++	xcode_pciout(0x8000089c, 0x871cc707);
++	xcode_pciin_a(0x800008b4);
++	xcode_bittoggle(0xfffff0ff,0x00000f00);
++	xcode_pciout_a(0x800008b4);
++	xcode_pciout(0x80000340, 0xf0f0c0c0);
++	xcode_pciout(0x80000344, 0x00c00000);
++	xcode_pciout(0x8000035c, 0x04070000);
++	xcode_pciout(0x8000036c, 0x00230801);
++	xcode_pciout(0x8000036c, 0x01230801);
++	xcode_goto(1);
++	xcode_goto(1);
++	xcode_poke(0x0f100200, 0x03070103);
++	xcode_poke(0x0f100204, 0x11448000);
++	xcode_pciout(0x8000103c, 0x00000000);
++
++
++	xcode_outb(SMBUS, 0x00000010);
++	
++	/* ----  Report Memory Size to PIC scratch register ---- */
++        
++        // We emulate Good memory result to PIC
++
++	//xcode_pciin_a(0x8000183c);
++	//xcode_bittoggle(0x000000ff,0x00000000);
++	//xcode_outb_a(SMBUS+6);
++
++
++	xcode_outb(SMBUS+4, 0x00000020);
++
++	SMB_xcode_Write(0x13,0x0f);		// +6
++	SMB_xcode_Write(0x12,0xf0);		// +6		
++
++	/* ---- Reload Nvidia Registers  ------------------------*/
++	
++	xcode_pciout(0x8000f020, 0xfdf0fd00);
++	xcode_pciout(0x80010010, 0xfd000000);
++	
++	
++	// overflow trick
++	xcode_poke(0x00000000, 0xfc1000ea);
++	xcode_poke(0x00000004, 0x000008ff);
++
++       	xcode_END(0x806);
+diff --git a/board/microsoft/xbox/boot-sector.S b/board/microsoft/xbox/boot-sector.S
+new file mode 100644
+index 0000000000..db37e492d2
+--- /dev/null
++++ b/board/microsoft/xbox/boot-sector.S
+@@ -0,0 +1,34 @@
++.section .decoy_boot, "ad"
++decoy_boot_sector:
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fe00
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fe10
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fe20
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fe30
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fe40
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fe50
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fe60
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fe70
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fe80
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fe90
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fea0
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3feb0
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fec0
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fed0
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fee0
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fef0
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3ff00
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3ff10
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3ff20
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3ff30
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3ff40
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3ff50
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3ff60
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3ff70
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3ff80
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3ff90
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3ffa0
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3ffb0
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0xfc	//3ffc0
++.byte 0xea,0x00,0x10,0xfc,0xff,0x08,0x00,0x90,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00	//3ffd0
++.byte 0xff,0xff,0x00,0x00,0x00,0x9b,0xcf,0x00,0xff,0xff,0x00,0x00,0x00,0x00,0xcf,0x00	//3ffe0
++.byte 0x90,0x90,0x90,0x90,0x18,0x00,0xd8,0xff,0xff,0xff,0x90,0x90,0x90,0x90,0x90,0x90	//3fff0
+diff --git a/board/microsoft/xbox/boot.S b/board/microsoft/xbox/boot.S
+new file mode 100644
+index 0000000000..80e5d52640
+--- /dev/null
++++ b/board/microsoft/xbox/boot.S
+@@ -0,0 +1,221 @@
++/*
++ * Copyright (C) 2015, Bin Meng <bmeng.cn@gmail.com>
++ *
++ * SPDX-License-Identifier:	GPL-2.0+
++ */
++
++#include "2bconsts.h"
++
++#define xcode_peek(val1) .byte 0x2; .long val1 ; .long 0x0 ;
++#define xcode_poke(val1,val2) .byte 0x3; .long val1 ; .long val2 ;
++#define xcode_pciout(val1,val2) .byte 0x4; .long val1 ; .long val2 ;
++#define xcode_pciin_a(val1) .byte 0x5; .long val1 ; .long 0x0 ;
++
++#define xcode_bittoggle(val1,val2) .byte 0x6; .long val1 ; .long val2 ;
++
++#define xcode_ifgoto(val1,val2) .byte 0x8; .long val1 ; .long (9*(val2-1)) ;
++
++#define xcode_outb(val1,val2) .byte 0x11; .long val1 ; .long val2 ;			    
++#define xcode_inb(val1) .byte 0x12; .long val1 ; .long 0x0 ;			    
++
++#define xcode_poke_a(val1) .byte 0x7; .long 0x3; .long val1 ;  
++#define xcode_pciout_a(val1) .byte 0x7; .long 0x4; .long val1 ;  
++#define xcode_outb_a(val1) .byte 0x7; .long 0x11; .long val1 ;  
++
++#define xcode_goto(val1) .byte 0x9; .long 0x0; .long (9*(val1-1));
++
++#define xcode_END(val1) .byte 0xEE; .long val1 ; .long 0x0;
++
++#define SMBUS 		0x0000c000
++
++
++#define SMB_xcode_Write(val1,val2); 	xcode_outb(SMBUS+8, val1); \
++					xcode_outb(SMBUS+6, val2); \
++					xcode_outb(SMBUS+2, 0x0000000a); \
++        				xcode_inb(SMBUS); \
++        				xcode_ifgoto(0x00000010,-1); \
++					xcode_outb(SMBUS, 0x00000010); 
++
++.org 0x0
++	/* MCPX Magic Values - clock timings*/
++	
++	.long 0xff000009
++	.long 0xff000008
++	.long 0x2b16d065
++	.long 0x3346322d
++	.long 0x01010101
++	.long 0x08080808
++	.long 0x00000801
++
++	#ifndef MCPXREVD5
++	.long 0xc8fc7c8a	// MCPX =< D5
++	.long 0x44290213
++	.long 0x90004998		
++	.long 0x00000000
++	#else
++	.long 0xc8b4588a	// MCPX 1.6 > D5
++	.long 0x00100000
++	.long 0x00050aa7
++	.long 0xf0000000
++	#endif
++
++	.long 0xffffffff
++	.long 0xffffffff
++	
++	.org 0x40
++	.long 0			// This number will be overwritten  
++				// With imagebld, but we need a temp value
++	
++	.org 0x6c
++	.long 0x00000107
++	
++	.org 0x70		// MCPX Config Area
++	.long 0x0000000f
++	.long 0x40004400
++	
++	#ifndef MCPXREVD5
++	.long 0x12d10070
++	.long 0x00000c90
++	#else
++	.long 0x16ce0090
++	.long 0x00000dc0	
++	#endif
++
++
++//The bytecode interpreter begins here
++//the xcodes section belongs at offset 0x80 in the bios file
++.org 0x80
++xcodes:
++#include "Xcodes.h"
++	// Note: never change this from offset 0x1000 ....
++	// This is the Main Entry point ....        
++.org 0x1000
++xbox_start:
++       	// Good Morning CPU
++
++	// NOTE:
++	/*
++		We come here form the high rom section Jump
++	*/
++	
++        // Clear Intel Interrupts in Processor Register
++	// Everytime very good, specially when comming out of a running envoronment
++		
++	movl	$0x1b, %ecx
++	xor	%eax, %eax
++	xor	%edx, %edx
++	wrmsr
++        
++	// Interrupts now Dead
++
++	xor	%eax, %eax
++	xor	%edx, %edx
++	xor	%ecx, %ecx
++	
++	// kill the cache  = Disable bit 30 + 29 = CD + NW 
++	// CD = Cache Disable (disable = 1)
++	// NW Not write through (disable = 1)
++       	mov 	%cr0, %eax
++	orl	$0x60000000, %eax
++	mov	%eax, %cr0
++	wbinvd
++
++	// We clear the cr3 register
++	mov	%eax, %eax
++	mov	%eax, %cr3
++
++	// Clear Memory Type register
++	movl	$0x2ff, %ecx
++	xor	%eax, %eax
++	xor	%edx, %edx
++	wrmsr
++
++/*
++  We are setting the Ram Init's now to set up the Regions in the Ram
++
++*/ 
++
++	// MTRR for RAM
++	// from address 0, Writeback Caching, 128MB range
++        movl	$0x200, %ecx
++	movl	$0x00000000, %edx
++	movl	$0x00000006, %eax 	// == WB_CACHE == 6
++	//movl	$0x00000004, %eax 	// Temporary, as USB development
++	wrmsr
++
++	// MASK0 set to 0xf8000[000] == 128M
++        movl	$0x201, %ecx
++	movl	$0x0000000f, %edx
++	movl	$0xf8000800, %eax
++	wrmsr
++
++	// MTRR for shadow RAM
++	// from address 0xf0000000, Write-combining Caching, 128MB range
++        movl	$0x202, %ecx
++	movl	$0x00000000, %edx
++	movl	$0xf0000001, %eax 	// Write-Combining == 1
++	wrmsr
++
++	// MASK0 set to 0xf8000[000] == 128M
++        movl	$0x203, %ecx
++	movl	$0x0000000f, %edx
++	movl	$0xf8000800, %eax
++	wrmsr
++
++     // MTRR for FLASH
++	movl	$0x204, %ecx
++	movl	$0x00000000, %edx
++	movl	$0xFff00000, %eax 	    // We set to Uncacheable
++	wrmsr
++
++        movl	$0x205, %ecx
++	movl	$0x0000000f, %edx
++	movl	$0xfff00800, %eax
++	wrmsr
++	
++
++        xor	%eax, %eax
++	xor	%edx, %edx
++
++	movl	$0x206, %ecx		// IA32_MTRR_PHYS Base 3
++        wrmsr
++	movl	$0x207, %ecx		// IA32_MTRR_PHYS_MASK 3
++        wrmsr
++
++	movl	$0x208, %ecx		// IA32_MTRR_PHYS Base 4
++        wrmsr                                                   
++	movl	$0x209, %ecx		// IA32_MTRR_PHYS_MASK 4
++        wrmsr                                                   
++
++	movl	$0x20a, %ecx		// IA32_MTRR_PHYS Base 5
++        wrmsr                                                   
++	movl	$0x20b, %ecx		// IA32_MTRR_PHYS_MASK 5
++        wrmsr                                                   
++
++	movl	$0x20c, %ecx		// IA32_MTRR_PHYS Base 6
++        wrmsr                                                   
++	movl	$0x20d, %ecx		// IA32_MTRR_PHYS_MASK 6
++        wrmsr
++
++	movl	$0x20e, %ecx		// IA32_MTRR_PHYS Base 7
++        wrmsr
++	movl	$0x20f, %ecx		// IA32_MTRR_PHYS_MASK 7
++        wrmsr                                                   
++                                              
++
++	// Define Memory in IA32_MTRR_DEF_TYPE
++	movl	$0x2ff, %ecx
++	xor	%edx, %edx
++	movl	$0x800, %eax //Enable MTRRs
++	wrmsr
++
++	/* turn on normal cache */
++	//  bit 30 + 29 = CD + NW 
++	// CD = Cache Disable (disable = 1)
++	// NW Not write through (disable = 1)
++	movl	%cr0, %eax
++	mov 	%eax, %ebx
++	andl	$0x9FFFFFFF,%eax
++	movl	%eax, %cr0
++
++        cld
 diff --git a/board/microsoft/xbox/car.S b/board/microsoft/xbox/car.S
 new file mode 100644
 index 0000000000..67141cb922
@@ -162,58 +1065,6 @@ index 0000000000..67141cb922
 +car_init:
 +	
 +	jmp	car_init_ret
-diff --git a/board/microsoft/xbox/cpu.c b/board/microsoft/xbox/cpu.c
-new file mode 100644
-index 0000000000..b1a965e715
---- /dev/null
-+++ b/board/microsoft/xbox/cpu.c
-@@ -0,0 +1,46 @@
-+/*
-+ * Copyright (C) 2015, Miao Yan <yanmiaobest@gmail.com>
-+ *
-+ * SPDX-License-Identifier:	GPL-2.0+
-+ */
-+
-+#include <common.h>
-+#include <cpu.h>
-+#include <dm.h>
-+#include <errno.h>
-+#include <qfw.h>
-+#include <asm/cpu.h>
-+
-+DECLARE_GLOBAL_DATA_PTR;
-+
-+int cpu_qemu_get_desc(struct udevice *dev, char *buf, int size)
-+{
-+	if (size < CPU_MAX_NAME_LEN)
-+		return -ENOSPC;
-+
-+	cpu_get_name(buf);
-+
-+	return 0;
-+}
-+
-+static int cpu_qemu_get_count(struct udevice *dev)
-+{
-+	return qemu_fwcfg_online_cpus();
-+}
-+
-+static const struct cpu_ops cpu_qemu_ops = {
-+	.get_desc	= cpu_qemu_get_desc,
-+	.get_count	= cpu_qemu_get_count,
-+};
-+
-+static const struct udevice_id cpu_qemu_ids[] = {
-+	{ .compatible = "cpu-qemu" },
-+	{ }
-+};
-+
-+U_BOOT_DRIVER(cpu_qemu_drv) = {
-+	.name		= "cpu_qemu",
-+	.id		= UCLASS_CPU,
-+	.of_match	= cpu_qemu_ids,
-+	.ops		= &cpu_qemu_ops,
-+};
 diff --git a/board/microsoft/xbox/dram.c b/board/microsoft/xbox/dram.c
 new file mode 100644
 index 0000000000..a5be543cb0
@@ -255,63 +1106,12 @@ index 0000000000..a5be543cb0
 +{
 +	return gd->ram_size;
 +}
-diff --git a/board/microsoft/xbox/e820.c b/board/microsoft/xbox/e820.c
-new file mode 100644
-index 0000000000..c1c9b89def
---- /dev/null
-+++ b/board/microsoft/xbox/e820.c
-@@ -0,0 +1,45 @@
-+/*
-+ * (C) Copyright 2015 Miao Yan <yanmiaobest@gmail.com>
-+ *
-+ * SPDX-License-Identifier:	GPL-2.0+
-+ */
-+
-+#include <common.h>
-+#include <asm/e820.h>
-+
-+DECLARE_GLOBAL_DATA_PTR;
-+
-+unsigned install_e820_map(unsigned max_entries, struct e820entry *entries)
-+{
-+	entries[0].addr = 0;
-+	entries[0].size = ISA_START_ADDRESS;
-+	entries[0].type = E820_RAM;
-+
-+	entries[1].addr = ISA_START_ADDRESS;
-+	entries[1].size = ISA_END_ADDRESS - ISA_START_ADDRESS;
-+	entries[1].type = E820_RESERVED;
-+
-+	/*
-+	 * since we use memalign(malloc) to allocate high memory for
-+	 * storing ACPI tables, we need to reserve them in e820 tables,
-+	 * otherwise kernel will reclaim them and data will be corrupted
-+	 */
-+	entries[2].addr = ISA_END_ADDRESS;
-+	entries[2].size = gd->relocaddr - TOTAL_MALLOC_LEN - ISA_END_ADDRESS;
-+	entries[2].type = E820_RAM;
-+
-+	/* for simplicity, reserve entire malloc space */
-+	entries[3].addr = gd->relocaddr - TOTAL_MALLOC_LEN;
-+	entries[3].size = TOTAL_MALLOC_LEN;
-+	entries[3].type = E820_RESERVED;
-+
-+	entries[4].addr = gd->relocaddr;
-+	entries[4].size = gd->ram_size - gd->relocaddr;
-+	entries[4].type = E820_RESERVED;
-+
-+	entries[5].addr = CONFIG_PCIE_ECAM_BASE;
-+	entries[5].size = CONFIG_PCIE_ECAM_SIZE;
-+	entries[5].type = E820_RESERVED;
-+
-+	return 6;
-+}
 diff --git a/board/microsoft/xbox/start.S b/board/microsoft/xbox/start.S
 new file mode 100644
-index 0000000000..a71db69be9
+index 0000000000..6a56c5749d
 --- /dev/null
 +++ b/board/microsoft/xbox/start.S
-@@ -0,0 +1,9 @@
+@@ -0,0 +1,30 @@
 +/*
 + * Copyright (C) 2015, Bin Meng <bmeng.cn@gmail.com>
 + *
@@ -320,13 +1120,34 @@ index 0000000000..a71db69be9
 +
 +.globl early_board_init
 +early_board_init:
++	mov	$0x8, %al
++	mov	$0x61, %dx
++	out	%al, %dx
++
++	// Enable IDE and NIC
++	mov 	$0x8000088C, %eax 
++	movw 	$0xcf8, %dx 
++	outl	%eax, %dx 
++	movw 	$0xcfc, %dx 
++	movl 	$0x40000000, %eax 
++	outl	%eax, %dx
++	
++      	
++	// CPU Whoami   ? sesless ?
++	mov 	$0x80000080, %eax 
++	movw 	$0xcf8, %dx 
++	outl	%eax, %dx 
++	movw 	$0xcfc, %dx 
++	movl 	$0x100, %eax 
++	outl	%eax, %dx 
++
 +	jmp	early_board_init_ret
 diff --git a/board/microsoft/xbox/xbox.c b/board/microsoft/xbox/xbox.c
 new file mode 100644
-index 0000000000..2673732c74
+index 0000000000..0d7abb1075
 --- /dev/null
 +++ b/board/microsoft/xbox/xbox.c
-@@ -0,0 +1,47 @@
+@@ -0,0 +1,101 @@
 +/*
 + * Copyright (C) 2015, Bin Meng <bmeng.cn@gmail.com>
 + *
@@ -336,18 +1157,71 @@ index 0000000000..2673732c74
 +#include <common.h>
 +#include <pci.h>
 +#include <qfw.h>
++#include <asm/io.h>
 +#include <asm/irq.h>
 +#include <asm/post.h>
 +#include <asm/processor.h>
 +
-+#if !CONFIG_IS_ENABLED(SPL_X86_32BIT_INIT)
++#include "2bconsts.h"
++
++u32 PciWriteDword(unsigned int bus, unsigned int dev, unsigned int func, unsigned int reg_off, unsigned int dw) 
++{
++		
++	u32 base_addr = 0x80000000;
++	base_addr |= ((bus & 0xFF) << 16);	// bus #
++	base_addr |= ((dev & 0x1F) << 11);	// device #
++	base_addr |= ((func & 0x07) << 8);	// func #
++	base_addr |= ((reg_off & 0xff));
++
++	writel(0xcf8, base_addr );	
++	writel(0xcfc ,dw);
++
++	return 0;    
++}
++
++u32 PciReadDword(unsigned int bus, unsigned int dev, unsigned int func, unsigned int reg_off)
++{
++	u32 base_addr = 0x80000000;
++	base_addr |= ((bus & 0xFF) << 16);	// bus #
++	base_addr |= ((dev & 0x1F) << 11);	// device #
++	base_addr |= ((func & 0x07) << 8);	// func #
++        base_addr |= ((func & 0x07) << 8);
++        base_addr |= ((reg_off & 0xff));
++        
++	writel(0xcf8, base_addr);
++	return readl(0xcfc);
++}
++
++void BootAGPBUSInitialization(void)
++{
++	u32 temp;
++	PciWriteDword(BUS_0, DEV_1, FUNC_0, 0x54,   PciReadDword(BUS_0, DEV_1, FUNC_0, 0x54) | 0x88000000 );
++	
++	PciWriteDword(BUS_0, DEV_0, FUNC_0, 0x64,   (PciReadDword(BUS_0, DEV_0, FUNC_0, 0x64))| 0x88000000 );
++	
++	temp =  PciReadDword(BUS_0, DEV_0, FUNC_0, 0x6C);
++	writel(0xcfc , temp & 0xFFFFFFFE);
++	writel(0xcfc , temp );
++	
++	PciWriteDword(BUS_0, DEV_0, FUNC_0, 0x80, 0x00000100);
++    
++}
++
 +int arch_cpu_init(void)
 +{
 +	post_code(POST_CPU_INIT);
++	BootPerformPicChallengeResponseAction();
++	// Sets the Graphics Card to 60 MB start address
++        (*(unsigned int*)0xFD600800) = (0xf0000000 | ((64*0x100000) - 0x00400000));
++        
++	BootAGPBUSInitialization();
 +
++	(*(unsigned int*)(0xFD000000 + 0x100200)) = 0x03070103 ;
++	(*(unsigned int*)(0xFD000000 + 0x100204)) = 0x11448000 ;
++        
++	PciWriteDword(BUS_0, DEV_0, FUNC_0, 0x84, 0x7FFFFFF); // 128 MB
 +	return x86_cpu_init_f();
 +}
-+#endif
 +
 +#if !CONFIG_IS_ENABLED(EFI_STUB) && \
 +	!CONFIG_IS_ENABLED(SPL_X86_32BIT_INIT)
@@ -374,9 +1248,10 @@ index 0000000000..2673732c74
 +{
 +	return 0;
 +}
++
 diff --git a/configs/microsoft-xbox_defconfig b/configs/microsoft-xbox_defconfig
 new file mode 100644
-index 0000000000..e1b5ca5c34
+index 0000000000..00bcd6b1af
 --- /dev/null
 +++ b/configs/microsoft-xbox_defconfig
 @@ -0,0 +1,863 @@
@@ -401,7 +1276,7 @@ index 0000000000..e1b5ca5c34
 +CONFIG_SYS_VENDOR="microsoft"
 +CONFIG_SYS_BOARD="xbox"
 +CONFIG_SYS_CONFIG_NAME="microsoft-xbox"
-+CONFIG_SYS_TEXT_BASE=0xfff00000
++CONFIG_SYS_TEXT_BASE=0xfffc0000
 +CONFIG_SYS_MALLOC_F_LEN=0x800
 +CONFIG_IDENT_STRING=""
 +
@@ -422,8 +1297,8 @@ index 0000000000..e1b5ca5c34
 +# CONFIG_INTEL_MID is not set
 +CONFIG_PCIE_ECAM_BASE=0xe0000000
 +CONFIG_DEFAULT_DEVICE_TREE="xbox"
-+CONFIG_SYS_CAR_ADDR=0xff7e0000
-+CONFIG_SYS_CAR_SIZE=0x20000
++CONFIG_SYS_CAR_ADDR=0x1dfff0
++CONFIG_SYS_CAR_SIZE=0x20004
 +CONFIG_ROM_TABLE_ADDR=0xf0000
 +CONFIG_ROM_TABLE_SIZE=0x10000
 +CONFIG_SMBIOS_PRODUCT_NAME="qemu-x86"
@@ -435,7 +1310,7 @@ index 0000000000..e1b5ca5c34
 +CONFIG_HPET_ADDRESS=0xfed00000
 +# CONFIG_SMM_TSEG is not set
 +# CONFIG_X86_RESET_VECTOR is not set
-+# CONFIG_X86_LOAD_FROM_32_BIT is not set
++CONFIG_X86_LOAD_FROM_32_BIT=y
 +# CONFIG_HAVE_INTEL_ME is not set
 +# CONFIG_X86_RAMTEST is not set
 +# CONFIG_HAVE_FSP is not set
@@ -794,8 +1669,8 @@ index 0000000000..e1b5ca5c34
 +CONFIG_OF_CONTROL=y
 +# CONFIG_OF_BOARD_FIXUP is not set
 +# CONFIG_OF_LIVE is not set
-+CONFIG_OF_SEPARATE=y
-+# CONFIG_OF_EMBED is not set
++# CONFIG_OF_SEPARATE is not set
++CONFIG_OF_EMBED=y
 +# CONFIG_OF_BOARD is not set
 +# CONFIG_MULTI_DTB_FIT is not set
 +CONFIG_MKIMAGE_DTC_PATH="dtc"

@@ -1,4 +1,4 @@
-From 830983df63426a0aec1b2dc24458c83c235323a8 Mon Sep 17 00:00:00 2001
+From bc623286584b26010be06607254e00b11810704d Mon Sep 17 00:00:00 2001
 From: Thomas Epperson <thomas.epperson@gmail.com>
 Date: Fri, 9 Nov 2018 18:36:29 -0500
 Subject: [PATCH] Add support for the original microsoft xbox
@@ -16,15 +16,15 @@ Subject: [PATCH] Add support for the original microsoft xbox
  board/microsoft/xbox/MAINTAINERS           |   3 +
  board/microsoft/xbox/Makefile              |  12 +
  board/microsoft/xbox/Xcodes.h              | 294 +++++++
- board/microsoft/xbox/boot-sector.S         |  34 +
+ board/microsoft/xbox/boot-sector.S         |  35 +
  board/microsoft/xbox/boot.S                | 221 ++++++
  board/microsoft/xbox/car.S                 |  10 +
  board/microsoft/xbox/dram.c                |  35 +
  board/microsoft/xbox/start.S               |  30 +
- board/microsoft/xbox/xbox.c                | 101 +++
- configs/microsoft-xbox_defconfig           | 863 +++++++++++++++++++++
+ board/microsoft/xbox/xbox.c                | 106 +++
+ configs/microsoft-xbox_defconfig           | 859 +++++++++++++++++++++
  include/configs/microsoft-xbox.h           |  31 +
- 20 files changed, 1971 insertions(+), 1 deletion(-)
+ 20 files changed, 1973 insertions(+), 1 deletion(-)
  create mode 100644 arch/x86/dts/xbox.dts
  create mode 100644 board/microsoft/Kconfig
  create mode 100644 board/microsoft/xbox/2bPicResponseAction.c
@@ -784,10 +784,10 @@ index 0000000000..ff37e7ded3
 +       	xcode_END(0x806);
 diff --git a/board/microsoft/xbox/boot-sector.S b/board/microsoft/xbox/boot-sector.S
 new file mode 100644
-index 0000000000..db37e492d2
+index 0000000000..375e821e75
 --- /dev/null
 +++ b/board/microsoft/xbox/boot-sector.S
-@@ -0,0 +1,34 @@
+@@ -0,0 +1,35 @@
 +.section .decoy_boot, "ad"
 +decoy_boot_sector:
 +.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fe00
@@ -818,9 +818,10 @@ index 0000000000..db37e492d2
 +.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3ff90
 +.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3ffa0
 +.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3ffb0
-+.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0xfc	//3ffc0
-+.byte 0xea,0x00,0x10,0xfc,0xff,0x08,0x00,0x90,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00	//3ffd0
-+.byte 0xff,0xff,0x00,0x00,0x00,0x9b,0xcf,0x00,0xff,0xff,0x00,0x00,0x00,0x00,0xcf,0x00	//3ffe0
++.ascii "AUTO"
++.byte 0x01,0x7f,0x03,0x90,0x90,0x90,0x90,0x90
++.long 0x40000
++.ascii "u-boot 2018.01                  "
 +.byte 0x90,0x90,0x90,0x90,0x18,0x00,0xd8,0xff,0xff,0xff,0x90,0x90,0x90,0x90,0x90,0x90	//3fff0
 diff --git a/board/microsoft/xbox/boot.S b/board/microsoft/xbox/boot.S
 new file mode 100644
@@ -1144,10 +1145,10 @@ index 0000000000..6a56c5749d
 +	jmp	early_board_init_ret
 diff --git a/board/microsoft/xbox/xbox.c b/board/microsoft/xbox/xbox.c
 new file mode 100644
-index 0000000000..0d7abb1075
+index 0000000000..3852449a75
 --- /dev/null
 +++ b/board/microsoft/xbox/xbox.c
-@@ -0,0 +1,101 @@
+@@ -0,0 +1,106 @@
 +/*
 + * Copyright (C) 2015, Bin Meng <bmeng.cn@gmail.com>
 + *
@@ -1249,12 +1250,17 @@ index 0000000000..0d7abb1075
 +	return 0;
 +}
 +
++int board_early_init_f(void)
++{
++	return 0;
++}
++
 diff --git a/configs/microsoft-xbox_defconfig b/configs/microsoft-xbox_defconfig
 new file mode 100644
-index 0000000000..00bcd6b1af
+index 0000000000..4ddaeea38a
 --- /dev/null
 +++ b/configs/microsoft-xbox_defconfig
-@@ -0,0 +1,863 @@
+@@ -0,0 +1,859 @@
 +#
 +# Automatically generated file; DO NOT EDIT.
 +# U-Boot 2018.01 Configuration
@@ -1385,8 +1391,8 @@ index 0000000000..00bcd6b1af
 +# CONFIG_SATA_BOOT is not set
 +# CONFIG_SD_BOOT is not set
 +# CONFIG_SPI_BOOT is not set
-+CONFIG_BOOTDELAY=2
-+# CONFIG_USE_BOOTARGS is not set
++CONFIG_USE_BOOTARGS=y
++CONFIG_BOOTARGS=""
 +# CONFIG_USE_BOOTCOMMAND is not set
 +
 +#
@@ -1412,14 +1418,14 @@ index 0000000000..00bcd6b1af
 +CONFIG_DEFAULT_FDT_FILE=""
 +# CONFIG_VERSION_VARIABLE is not set
 +CONFIG_DISPLAY_CPUINFO=y
-+# CONFIG_DISPLAY_BOARDINFO is not set
++CONFIG_DISPLAY_BOARDINFO=y
 +
 +#
 +# Start-up hooks
 +#
 +CONFIG_ARCH_EARLY_INIT_R=y
 +# CONFIG_ARCH_MISC_INIT is not set
-+# CONFIG_BOARD_EARLY_INIT_F is not set
++CONFIG_BOARD_EARLY_INIT_F=y
 +
 +#
 +# Security support
@@ -1440,8 +1446,13 @@ index 0000000000..00bcd6b1af
 +#
 +# Autoboot options
 +#
-+CONFIG_AUTOBOOT=y
-+# CONFIG_AUTOBOOT_KEYED is not set
++# CONFIG_AUTOBOOT is not set
++CONFIG_AUTOBOOT_KEYED=y
++CONFIG_AUTOBOOT_PROMPT="Autoboot in %d seconds\n"
++# CONFIG_AUTOBOOT_ENCRYPTION is not set
++CONFIG_AUTOBOOT_DELAY_STR=""
++CONFIG_AUTOBOOT_STOP_STR=""
++# CONFIG_AUTOBOOT_KEYED_CTRLC is not set
 +
 +#
 +# FASTBOOT
@@ -1465,19 +1476,16 @@ index 0000000000..00bcd6b1af
 +#
 +CONFIG_CMD_BOOTD=y
 +CONFIG_CMD_BOOTM=y
-+# CONFIG_CMD_BOOTZ is not set
-+CONFIG_CMD_BOOTEFI=y
-+CONFIG_CMD_BOOTEFI_HELLO_COMPILE=y
-+# CONFIG_CMD_BOOTEFI_HELLO is not set
-+# CONFIG_CMD_BOOTEFI_SELFTEST is not set
++CONFIG_CMD_BOOTZ=y
++# CONFIG_CMD_BOOTEFI is not set
 +# CONFIG_CMD_BOOTMENU is not set
-+CONFIG_CMD_ELF=y
++# CONFIG_CMD_ELF is not set
 +CONFIG_CMD_FDT=y
 +CONFIG_CMD_GO=y
 +CONFIG_CMD_RUN=y
-+CONFIG_CMD_IMI=y
++# CONFIG_CMD_IMI is not set
 +# CONFIG_CMD_IMLS is not set
-+CONFIG_CMD_XIMG=y
++# CONFIG_CMD_XIMG is not set
 +# CONFIG_CMD_POWEROFF is not set
 +# CONFIG_CMD_THOR_DOWNLOAD is not set
 +CONFIG_CMD_ZBOOT=y
@@ -1526,12 +1534,8 @@ index 0000000000..00bcd6b1af
 +# CONFIG_CMD_DFU is not set
 +CONFIG_CMD_DM=y
 +# CONFIG_CMD_FDC is not set
-+CONFIG_CMD_FLASH=y
-+CONFIG_CMD_FPGA=y
-+# CONFIG_CMD_FPGA_LOADBP is not set
-+# CONFIG_CMD_FPGA_LOADFS is not set
-+CONFIG_CMD_FPGA_LOADMK=y
-+# CONFIG_CMD_FPGA_LOADP is not set
++# CONFIG_CMD_FLASH is not set
++# CONFIG_CMD_FPGA is not set
 +# CONFIG_CMD_FPGAD is not set
 +# CONFIG_CMD_FUSE is not set
 +# CONFIG_CMD_GPIO is not set
@@ -1548,14 +1552,14 @@ index 0000000000..00bcd6b1af
 +# CONFIG_CMD_MMC_SPI is not set
 +# CONFIG_CMD_ONENAND is not set
 +# CONFIG_CMD_PART is not set
-+CONFIG_CMD_PCI=y
++# CONFIG_CMD_PCI is not set
 +# CONFIG_CMD_PCMCIA is not set
 +# CONFIG_CMD_READ is not set
 +# CONFIG_CMD_SATA is not set
 +# CONFIG_CMD_SAVES is not set
 +# CONFIG_CMD_SDRAM is not set
 +# CONFIG_CMD_SF is not set
-+CONFIG_CMD_SF_TEST=y
++# CONFIG_CMD_SF_TEST is not set
 +# CONFIG_CMD_SPI is not set
 +# CONFIG_CMD_TSI148 is not set
 +# CONFIG_CMD_UNIVERSE is not set
@@ -1574,13 +1578,13 @@ index 0000000000..00bcd6b1af
 +#
 +# Network commands
 +#
-+CONFIG_CMD_NET=y
++# CONFIG_CMD_NET is not set
 +# CONFIG_CMD_TFTPPUT is not set
 +# CONFIG_CMD_TFTPSRV is not set
 +# CONFIG_CMD_RARP is not set
 +# CONFIG_CMD_DHCP is not set
 +# CONFIG_CMD_PXE is not set
-+CONFIG_CMD_NFS=y
++# CONFIG_CMD_NFS is not set
 +# CONFIG_CMD_MII is not set
 +# CONFIG_CMD_PING is not set
 +# CONFIG_CMD_CDP is not set
@@ -1633,10 +1637,8 @@ index 0000000000..00bcd6b1af
 +# CONFIG_CMD_FS_UUID is not set
 +# CONFIG_CMD_JFFS2 is not set
 +# CONFIG_CMD_MTDPARTS is not set
-+CONFIG_MTDIDS_DEFAULT=""
-+CONFIG_MTDPARTS_DEFAULT=""
 +# CONFIG_CMD_REISER is not set
-+CONFIG_CMD_SCSI=y
++# CONFIG_CMD_SCSI is not set
 +# CONFIG_CMD_ZFS is not set
 +
 +#
@@ -1655,7 +1657,7 @@ index 0000000000..00bcd6b1af
 +#
 +CONFIG_PARTITIONS=y
 +# CONFIG_MAC_PARTITION is not set
-+# CONFIG_DOS_PARTITION is not set
++CONFIG_DOS_PARTITION=y
 +# CONFIG_ISO_PARTITION is not set
 +# CONFIG_AMIGA_PARTITION is not set
 +# CONFIG_EFI_PARTITION is not set

@@ -1,4 +1,4 @@
-From bc623286584b26010be06607254e00b11810704d Mon Sep 17 00:00:00 2001
+From d14de3f232c8cbacef82a9b83542400a1f130715 Mon Sep 17 00:00:00 2001
 From: Thomas Epperson <thomas.epperson@gmail.com>
 Date: Fri, 9 Nov 2018 18:36:29 -0500
 Subject: [PATCH] Add support for the original microsoft xbox
@@ -139,7 +139,7 @@ index 0000000000..083569500f
 +endif
 diff --git a/board/microsoft/xbox/2bPicResponseAction.c b/board/microsoft/xbox/2bPicResponseAction.c
 new file mode 100644
-index 0000000000..6aa3c6e26e
+index 0000000000..527aa7a47c
 --- /dev/null
 +++ b/board/microsoft/xbox/2bPicResponseAction.c
 @@ -0,0 +1,155 @@
@@ -160,7 +160,7 @@ index 0000000000..6aa3c6e26e
 +#include <asm/io.h>
 +
 +#include "2bload.h"
-+
++#include "2bconsts.h"
 +
 +// ----------------------------  I2C -----------------------------------------------------------
 +//
@@ -171,19 +171,19 @@ index 0000000000..6aa3c6e26e
 +{
 +	int nRetriesToLive=400;
 +
-+	//if(readw(I2C_IO_BASE+0)&0x8000) {  }
-+	while(readw(I2C_IO_BASE+0)&0x0800) ;  // Franz's spin while bus busy with any master traffic
++	//if(inw(I2C_IO_BASE+0)&0x8000) {  }
++	while(inw(I2C_IO_BASE+0)&0x0800) ;  // Franz's spin while bus busy with any master traffic
 +
 +	while(nRetriesToLive--) {
 +
-+		writeb(I2C_IO_BASE+4, (bPicAddressI2cFormat<<1)|1);
-+		writeb(I2C_IO_BASE+8, bDataToWrite);
-+		writew(I2C_IO_BASE+0, 0xffff); // clear down all preexisting errors
-+		writeb(I2C_IO_BASE+2, 0x0a);
++		outb((bPicAddressI2cFormat<<1)|1, I2C_IO_BASE+4);
++		outb(bDataToWrite, I2C_IO_BASE+8);
++		outw(0xffff, I2C_IO_BASE+0); // clear down all preexisting errors
++		outb(0x0a, I2C_IO_BASE+2);
 +
 +		{
 +			uint8_t b=0x0;
-+			while( (b&0x36)==0 ) { b=readb(I2C_IO_BASE+0); }
++			while( (b&0x36)==0 ) { b=inb(I2C_IO_BASE+0); }
 +
 +			if(b&0x24) {
 +				//bprintf("I2CTransmitByteGetReturn error %x\n", b);
@@ -191,7 +191,7 @@ index 0000000000..6aa3c6e26e
 +			if(!(b&0x10)) {
 +				//bprintf("I2CTransmitByteGetReturn no complete, retry\n");
 +			} else {
-+				return (int)readb(I2C_IO_BASE+6);
++				return (int)inb(I2C_IO_BASE+6);
 +			}
 +		}
 +	}
@@ -205,19 +205,19 @@ index 0000000000..6aa3c6e26e
 +{
 +	int nRetriesToLive=400;
 +
-+	while(readw(I2C_IO_BASE+0)&0x0800) ;  // Franz's spin while bus busy with any master traffic
++	while(inw(I2C_IO_BASE+0)&0x0800) ;  // Franz's spin while bus busy with any master traffic
 +
 +	while(nRetriesToLive--) {
-+		writeb(I2C_IO_BASE+4, (bPicAddressI2cFormat<<1)|0);
++		outb((bPicAddressI2cFormat<<1)|0, I2C_IO_BASE+4);
 +
-+		writeb(I2C_IO_BASE+8, (uint8_t)(wDataToWrite>>8));
-+		writeb(I2C_IO_BASE+6, (uint8_t)wDataToWrite);
-+		writew(I2C_IO_BASE+0, 0xffff);  // clear down all preexisting errors
-+		writeb(I2C_IO_BASE+2, 0x1a);
++		outb((uint8_t)(wDataToWrite>>8), I2C_IO_BASE+8);
++		outb((uint8_t)wDataToWrite, I2C_IO_BASE+6);
++		outw(0xffff, I2C_IO_BASE+0);  // clear down all preexisting errors
++		outb(0x1a, I2C_IO_BASE+2);
 +
 +		{
 +			uint8_t b=0x0;
-+			while( (b&0x36)==0 ) { b=readb(I2C_IO_BASE+0); }
++			while( (b&0x36)==0 ) { b=inb(I2C_IO_BASE+0); }
 +
 +			if(b&0x24) {
 +				//bprintf("I2CTransmitWord error %x\n", b);

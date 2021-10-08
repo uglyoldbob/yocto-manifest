@@ -1,0 +1,41 @@
+BB_NUMBER_THREADS ?= "${@oe.utils.cpu_count()}"
+PARALLEL_MAKE ?= "-j ${@oe.utils.cpu_count()}"
+
+#MACHINE ?= "qemuarm"
+#MACHINE ?= "qemumips"
+#MACHINE ?= "qemuppc"
+#MACHINE ?= "qemux86"
+#MACHINE ?= "qemux86-64"
+MACHINE ?= "xbox"
+
+DL_DIR ?= "${TOPDIR}/downloads"
+SSTATE_DIR ?= "${TOPDIR}/sstate-cache"
+TMPDIR = "${TOPDIR}/tmp"
+
+DISTRO ?= "poky"
+
+PRSERV_HOST ?= "localhost:0"
+
+# There are other application targets that can be used here too, see
+# meta/classes/image.bbclass and meta/classes/core-image.bbclass for more details.
+# We default to enabling the debugging tweaks.
+#EXTRA_IMAGE_FEATURES = "debug-tweaks"
+
+#   - 'buildstats' collect build statistics
+#   - 'image-mklibs' to reduce shared library files size for an image
+#   - 'image-prelink' in order to prelink the filesystem image
+#   - 'image-swab' to perform host system intrusion detection
+# NOTE: if listing mklibs & prelink both, then make sure mklibs is before prelink
+# NOTE: mklibs also needs to be explicitly enabled for a given image, see local.conf.extended
+USER_CLASSES ?= "image-mklibs image-prelink"
+
+PATCHRESOLVE = "noop"
+
+CONF_VERSION = "1"
+
+# Use systemd as init manager
+DISTRO_FEATURES_append = " systemd"
+VIRTUAL-RUNTIME_init_manager = "systemd"
+DISTRO_FEATURES_BACKFILL_CONSIDERED = "sysvinit"
+
+RM_OLD_IMAGE = "1"

@@ -4,8 +4,8 @@
   <remote name="oe" fetch="git://git.openembedded.org" />
   <remote fetch="git://github.com/uglyoldbob" name="uglyoldbob"/>
   
-  <project name="oe-custom" path="poky/meta-uglyoldbob" remote="uglyoldbob" revision="refs/heads/master"/>
-  <project name="poky" revision="d88d62c20d7d8da85f02edb170dae0280624ad7e" remote="yocto" />
-  <project name="meta-openembedded" revision="2b5dd1eb81cd08bc065bc76125f2856e9383e98b"  remote="oe" path="poky/meta-openembedded" />
+  <project name="oe-custom" path="sources/meta-uglyoldbob" remote="uglyoldbob" revision="refs/heads/master"/>
+  <project name="poky" revision="d88d62c20d7d8da85f02edb170dae0280624ad7e" remote="yocto" path="sources/poky" />
+  <project name="meta-openembedded" revision="2b5dd1eb81cd08bc065bc76125f2856e9383e98b"  remote="oe" path="sources/meta-openembedded" />
 
 </manifest>

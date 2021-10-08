@@ -1,0 +1,2162 @@
+From d14de3f232c8cbacef82a9b83542400a1f130715 Mon Sep 17 00:00:00 2001
+From: Thomas Epperson <thomas.epperson@gmail.com>
+Date: Fri, 9 Nov 2018 18:36:29 -0500
+Subject: [PATCH] Add support for the original microsoft xbox
+
+---
+ arch/x86/Kconfig                           |   4 +
+ arch/x86/cpu/start.S                       |   3 +
+ arch/x86/cpu/u-boot.lds                    |   4 +-
+ arch/x86/dts/xbox.dts                      |  15 +
+ board/microsoft/Kconfig                    |  18 +
+ board/microsoft/xbox/2bPicResponseAction.c | 155 ++++
+ board/microsoft/xbox/2bconsts.h            |  71 ++
+ board/microsoft/xbox/2bload.h              |  53 ++
+ board/microsoft/xbox/Kconfig               |  15 +
+ board/microsoft/xbox/MAINTAINERS           |   3 +
+ board/microsoft/xbox/Makefile              |  12 +
+ board/microsoft/xbox/Xcodes.h              | 294 +++++++
+ board/microsoft/xbox/boot-sector.S         |  35 +
+ board/microsoft/xbox/boot.S                | 221 ++++++
+ board/microsoft/xbox/car.S                 |  10 +
+ board/microsoft/xbox/dram.c                |  35 +
+ board/microsoft/xbox/start.S               |  30 +
+ board/microsoft/xbox/xbox.c                | 106 +++
+ configs/microsoft-xbox_defconfig           | 859 +++++++++++++++++++++
+ include/configs/microsoft-xbox.h           |  31 +
+ 20 files changed, 1973 insertions(+), 1 deletion(-)
+ create mode 100644 arch/x86/dts/xbox.dts
+ create mode 100644 board/microsoft/Kconfig
+ create mode 100644 board/microsoft/xbox/2bPicResponseAction.c
+ create mode 100644 board/microsoft/xbox/2bconsts.h
+ create mode 100644 board/microsoft/xbox/2bload.h
+ create mode 100644 board/microsoft/xbox/Kconfig
+ create mode 100644 board/microsoft/xbox/MAINTAINERS
+ create mode 100644 board/microsoft/xbox/Makefile
+ create mode 100644 board/microsoft/xbox/Xcodes.h
+ create mode 100644 board/microsoft/xbox/boot-sector.S
+ create mode 100644 board/microsoft/xbox/boot.S
+ create mode 100644 board/microsoft/xbox/car.S
+ create mode 100644 board/microsoft/xbox/dram.c
+ create mode 100644 board/microsoft/xbox/start.S
+ create mode 100644 board/microsoft/xbox/xbox.c
+ create mode 100644 configs/microsoft-xbox_defconfig
+ create mode 100644 include/configs/microsoft-xbox.h
+
+diff --git a/arch/x86/Kconfig b/arch/x86/Kconfig
+index 5c23b2cb57..d8c461bff8 100644
+--- a/arch/x86/Kconfig
++++ b/arch/x86/Kconfig
+@@ -78,6 +78,9 @@ config VENDOR_GOOGLE
+ config VENDOR_INTEL
+ 	bool "Intel"
+ 
++config VENDOR_MICROSOFT
++	bool "Microsoft"
++
+ endchoice
+ 
+ # subarchitectures-specific options below
+@@ -105,6 +108,7 @@ source "board/efi/Kconfig"
+ source "board/emulation/Kconfig"
+ source "board/google/Kconfig"
+ source "board/intel/Kconfig"
++source "board/microsoft/Kconfig"
+ 
+ # platform-specific options below
+ source "arch/x86/cpu/baytrail/Kconfig"
+diff --git a/arch/x86/cpu/start.S b/arch/x86/cpu/start.S
+index 8de55a0af1..ed5b0e101f 100644
+--- a/arch/x86/cpu/start.S
++++ b/arch/x86/cpu/start.S
+@@ -24,6 +24,9 @@
+ .type _start, @function
+ .globl _x86boot_start
+ _x86boot_start:
++#ifdef CONFIG_TARGET_XBOX
++#include "../board/microsoft/xbox/boot.S"
++#endif
+ 	/*
+ 	 * This is the fail-safe 32-bit bootstrap entry point.
+ 	 *
+diff --git a/arch/x86/cpu/u-boot.lds b/arch/x86/cpu/u-boot.lds
+index 186718d8f9..acfb53b192 100644
+--- a/arch/x86/cpu/u-boot.lds
++++ b/arch/x86/cpu/u-boot.lds
+@@ -118,5 +118,7 @@ SECTIONS
+ 		KEEP(*(.resetvec));
+ 	}
+ #endif
+-
++#ifdef CONFIG_TARGET_XBOX
++	.decoy_boot : AT (CONFIG_SYS_TEXT_BASE + 0x3fe00) { KEEP(*(.decoy_boot*)) }
++#endif
+ }
+diff --git a/arch/x86/dts/xbox.dts b/arch/x86/dts/xbox.dts
+new file mode 100644
+index 0000000000..bb94b9a138
+--- /dev/null
++++ b/arch/x86/dts/xbox.dts
+@@ -0,0 +1,15 @@
++/*
++ * Skeleton device tree; the bare minimum needed to boot; just include and
++ * add a compatible value.  The bootloader will typically populate the memory
++ * node.
++ */
++
++/dts-v1/;
++
++/ {
++	#address-cells = <1>;
++	#size-cells = <1>;
++	chosen { };
++	aliases { };
++	memory { device_type = "memory"; reg = <0 0>; };
++};
+diff --git a/board/microsoft/Kconfig b/board/microsoft/Kconfig
+new file mode 100644
+index 0000000000..083569500f
+--- /dev/null
++++ b/board/microsoft/Kconfig
+@@ -0,0 +1,18 @@
++if VENDOR_MICROSOFT
++
++choice
++	prompt "Microsoft Machine"
++	optional
++
++config TARGET_XBOX
++	bool "Microsoft Xbox"
++	help
++	  The original microsoft xbox
++endchoice
++
++config SYS_VENDOR
++	default "microsoft"
++
++source "board/microsoft/xbox/Kconfig"
++
++endif
+diff --git a/board/microsoft/xbox/2bPicResponseAction.c b/board/microsoft/xbox/2bPicResponseAction.c
+new file mode 100644
+index 0000000000..527aa7a47c
+--- /dev/null
++++ b/board/microsoft/xbox/2bPicResponseAction.c
+@@ -0,0 +1,155 @@
++/*
++ * I2C-related code
++ * AG 2002-07-27
++ */
++
++ /***************************************************************************
++ *                                                                         *
++ *   This program is free software; you can redistribute it and/or modify  *
++ *   it under the terms of the GNU General Public License as published by  *
++ *   the Free Software Foundation; either version 2 of the License, or     *
++ *   (at your option) any later version.                                   *
++ *                                                                         *
++ ***************************************************************************/
++
++#include <asm/io.h>
++
++#include "2bload.h"
++#include "2bconsts.h"
++
++// ----------------------------  I2C -----------------------------------------------------------
++//
++// get a value from a given device address
++// errors will have b31 set, ie, will be negative, otherwise fetched byte in LSB of return
++
++int I2CTransmitByteGetReturn(uint8_t bPicAddressI2cFormat, uint8_t bDataToWrite)
++{
++	int nRetriesToLive=400;
++
++	//if(inw(I2C_IO_BASE+0)&0x8000) {  }
++	while(inw(I2C_IO_BASE+0)&0x0800) ;  // Franz's spin while bus busy with any master traffic
++
++	while(nRetriesToLive--) {
++
++		outb((bPicAddressI2cFormat<<1)|1, I2C_IO_BASE+4);
++		outb(bDataToWrite, I2C_IO_BASE+8);
++		outw(0xffff, I2C_IO_BASE+0); // clear down all preexisting errors
++		outb(0x0a, I2C_IO_BASE+2);
++
++		{
++			uint8_t b=0x0;
++			while( (b&0x36)==0 ) { b=inb(I2C_IO_BASE+0); }
++
++			if(b&0x24) {
++				//bprintf("I2CTransmitByteGetReturn error %x\n", b);
++			}
++			if(!(b&0x10)) {
++				//bprintf("I2CTransmitByteGetReturn no complete, retry\n");
++			} else {
++				return (int)inb(I2C_IO_BASE+6);
++			}
++		}
++	}
++
++	return ERR_I2C_ERROR_BUS;
++}
++
++// transmit a word, no returned data from I2C device
++
++int I2CTransmitWord(uint8_t bPicAddressI2cFormat, u16 wDataToWrite)
++{
++	int nRetriesToLive=400;
++
++	while(inw(I2C_IO_BASE+0)&0x0800) ;  // Franz's spin while bus busy with any master traffic
++
++	while(nRetriesToLive--) {
++		outb((bPicAddressI2cFormat<<1)|0, I2C_IO_BASE+4);
++
++		outb((uint8_t)(wDataToWrite>>8), I2C_IO_BASE+8);
++		outb((uint8_t)wDataToWrite, I2C_IO_BASE+6);
++		outw(0xffff, I2C_IO_BASE+0);  // clear down all preexisting errors
++		outb(0x1a, I2C_IO_BASE+2);
++
++		{
++			uint8_t b=0x0;
++			while( (b&0x36)==0 ) { b=inb(I2C_IO_BASE+0); }
++
++			if(b&0x24) {
++				//bprintf("I2CTransmitWord error %x\n", b);
++			}
++			if(!(b&0x10)) {
++				//bprintf("I2CTransmitWord no complete, retry\n");
++			} else {
++				return ERR_SUCCESS;
++			}
++		}
++	}
++	return ERR_I2C_ERROR_BUS;
++}
++
++// ----------------------------  PIC challenge/response -----------------------------------------------------------
++//
++// given four bytes, returns a u16
++// LSB of return is the 'first' byte, MSB is the 'second' response byte
++
++u16 BootPicManipulation(
++	uint8_t bC,
++	uint8_t  bD,
++	uint8_t  bE,
++	uint8_t  bF
++) {
++	int n=4;
++	uint8_t
++		b1 = 0x33,
++		b2 = 0xed,
++		b3 = ((bC<<2) ^ (bD +0x39) ^ (bE >>2) ^ (bF +0x63)),
++		b4 = ((bC+0x0b) ^ (bD>>2) ^ (bE +0x1b))
++	;
++
++	while(n--) {
++		b1 += b2 ^ b3;
++		b2 += b1 ^ b4;
++	}
++
++	return (u16) ((((u16)b2)<<8) | b1);
++}
++
++// actual business of getting I2C data from PIC and reissuing munged version
++// returns zero if all okay, else error code
++
++int BootPerformPicChallengeResponseAction()
++{
++	uint8_t bC, bD, bE, bF;
++	int n;
++
++	n=I2CTransmitByteGetReturn( 0x10, 0x1c );
++	if(n<0) return n;
++	bC=n;
++	n=I2CTransmitByteGetReturn( 0x10, 0x1d );
++	if(n<0) return n;
++	bD=n;
++	n=I2CTransmitByteGetReturn( 0x10, 0x1e );
++	if(n<0) return n;
++	bE=n;
++	n=I2CTransmitByteGetReturn( 0x10, 0x1f );
++	if(n<0) return n;
++	bF=n;
++
++	{
++		u16 w=BootPicManipulation(bC, bD, bE, bF);
++
++		I2CTransmitWord( 0x10, 0x2000 | (w&0xff));
++		I2CTransmitWord( 0x10, 0x2100 | (w>>8) );
++	}
++
++	// continues as part of video setup....
++	return ERR_SUCCESS;
++}
++
++extern int I2cSetFrontpanelLed(uint8_t b)
++{
++	I2CTransmitWord( 0x10, 0x800 | b);  // sequencing thanks to Jarin the Penguin!
++	I2CTransmitWord( 0x10, 0x701);
++	return ERR_SUCCESS;
++}
++
+diff --git a/board/microsoft/xbox/2bconsts.h b/board/microsoft/xbox/2bconsts.h
+new file mode 100644
+index 0000000000..763f6a71e6
+--- /dev/null
++++ b/board/microsoft/xbox/2bconsts.h
+@@ -0,0 +1,71 @@
++/*
++ *
++ * includes for startup code in a form usable by the .S files
++ *
++ */
++
++  /***************************************************************************
++ *                                                                         *
++ *   This program is free software; you can redistribute it and/or modify  *
++ *   it under the terms of the GNU General Public License as published by  *
++ *   the Free Software Foundation; either version 2 of the License, or     *
++ *   (at your option) any later version.                                   *
++ *                                                                         *
++ ***************************************************************************/
++
++#define PCI_CFG_ADDR 0x0CF8
++#define PCI_CFG_DATA 0x0CFC
++
++#define MTRR_DEF 0x2ff
++#define MTRR_DEF_TYPE 0x800
++#define MTRR_PHYSBASE 0x200
++#define MTRR_LAST 0x20F
++#define WB_CACHE 6
++#define BASE0_H 0
++#define BASE0_L WB_CACHE
++#define MASK0_H 0x0F
++#define MASK0_L 0xFC000800
++#define BASE1_H 0
++#define BASE1_L 0xFFF80005
++#define MASK1_H 0x0F
++#define MASK1_L 0x0FFF80800
++
++#define I2C_IO_BASE 0xc000
++
++#define BUS_0 0
++#define BUS_1 1
++
++#define DEV_0 0
++#define DEV_1 1
++#define DEV_2 2
++#define DEV_3 3
++#define DEV_4 4
++#define DEV_5 5
++#define DEV_6 6
++#define DEV_7 7
++#define DEV_8 8
++#define DEV_9 9
++#define DEV_a 0xa
++#define DEV_b 0xb
++#define DEV_c 0xc
++#define DEV_d 0xd
++#define DEV_e 0xe
++#define DEV_f 0xf
++#define DEV_10 0x10
++#define DEV_11 0x11
++#define DEV_12 0x12
++#define DEV_13 0x13
++#define DEV_14 0x14
++#define DEV_15 0x15
++#define DEV_16 0x16
++#define DEV_17 0x17
++#define DEV_18 0x18
++#define DEV_19 0x19
++#define DEV_1a 0x1a
++#define DEV_1b 0x1b
++#define DEV_1c 0x1c
++#define DEV_1d 0x1d
++#define DEV_1e 0x1e
++#define DEV_1f 0x1f
++
++#define FUNC_0 0
+diff --git a/board/microsoft/xbox/2bload.h b/board/microsoft/xbox/2bload.h
+new file mode 100644
+index 0000000000..5b42175ad9
+--- /dev/null
++++ b/board/microsoft/xbox/2bload.h
+@@ -0,0 +1,53 @@
++/***************************************************************************
++      Includes used by XBox boot code
++ ***************************************************************************/
++/***************************************************************************
++ *                                                                         *
++ *   This program is free software; you can redistribute it and/or modify  *
++ *   it under the terms of the GNU General Public License as published by  *
++ *   the Free Software Foundation; either version 2 of the License, or     *
++ *   (at your option) any later version.                                   *
++ *                                                                         *
++ ***************************************************************************/
++
++typedef unsigned int size_t;
++
++#include "2bconsts.h"
++
++/////////////////////////////////
++// LED-flashing codes
++// or these together as argument to I2cSetFrontpanelLed
++
++enum {
++	I2C_LED_RED0 = 0x80,
++	I2C_LED_RED1 = 0x40,
++	I2C_LED_RED2 = 0x20,
++	I2C_LED_RED3 = 0x10,
++	I2C_LED_GREEN0 = 0x08,
++	I2C_LED_GREEN1 = 0x04,
++	I2C_LED_GREEN2 = 0x02,
++	I2C_LED_GREEN3 = 0x01
++};
++
++///////////////////////////////
++/* BIOS-wide error codes		all have b31 set  */
++
++enum {
++	ERR_SUCCESS = 0,  // completed without error
++
++	ERR_I2C_ERROR_TIMEOUT = 0x80000001,  // I2C action failed because it did not complete in a reasonable time
++	ERR_I2C_ERROR_BUS = 0x80000002, // I2C action failed due to non retryable bus error
++
++	ERR_BOOT_PIC_ALG_BROKEN = 0x80000101 // PIC algorithm did not pass its self-test
++};
++
++// boot process
++int BootPerformPicChallengeResponseAction(void);
++// LED control (see associated enum above)
++int I2cSetFrontpanelLed(uint8_t b);
++
++///////// BootPerformPicChallengeResponseAction.c
++
++int I2CTransmitWord(uint8_t bPicAddressI2cFormat, uint16_t wDataToWrite);
++int I2CTransmitByteGetReturn(uint8_t bPicAddressI2cFormat, uint8_t bDataToWrite);
++
+diff --git a/board/microsoft/xbox/Kconfig b/board/microsoft/xbox/Kconfig
+new file mode 100644
+index 0000000000..f03e20f65d
+--- /dev/null
++++ b/board/microsoft/xbox/Kconfig
+@@ -0,0 +1,15 @@
++if TARGET_XBOX
++	config SYS_CONFIG_NAME
++		default "microsoft-xbox"
++
++	config SYS_BOARD
++		default "xbox"
++
++	config SYS_CAR_ADDR
++		hex
++		default 0x1dfff0
++
++	config SYS_CAR_SIZE
++		hex
++		default 0x20004
++endif
+diff --git a/board/microsoft/xbox/MAINTAINERS b/board/microsoft/xbox/MAINTAINERS
+new file mode 100644
+index 0000000000..ba63c447cc
+--- /dev/null
++++ b/board/microsoft/xbox/MAINTAINERS
+@@ -0,0 +1,3 @@
++XBOX BOARD
++M:	Thomas Epperson <thomas.epperson@gmail.com>
++S:	Maintained
+diff --git a/board/microsoft/xbox/Makefile b/board/microsoft/xbox/Makefile
+new file mode 100644
+index 0000000000..e00968da69
+--- /dev/null
++++ b/board/microsoft/xbox/Makefile
+@@ -0,0 +1,12 @@
++# SPDX-License-Identifier: GPL-2.0+
++#
++# (C) Copyright 2001-2006
++# Wolfgang Denk, DENX Software Engineering, wd@denx.de.
++# (C) Copyright 2010, Thomas Chou <thomas@wytron.com.tw>
++
++obj-y	+= xbox.o
++obj-y	+= start.o
++obj-y	+= car.o
++obj-y	+= dram.o
++obj-y	+= 2bPicResponseAction.o
++obj-y	+= boot-sector.o
+diff --git a/board/microsoft/xbox/Xcodes.h b/board/microsoft/xbox/Xcodes.h
+new file mode 100644
+index 0000000000..ff37e7ded3
+--- /dev/null
++++ b/board/microsoft/xbox/Xcodes.h
+@@ -0,0 +1,294 @@
++/*
++ *
++ *  BIOS ROM Startup Assembler
++ *  (C)2002 Andy, Michael, Paul, Steve
++ * Original top and bottom ROM code by Steve from an idea by Michael
++ * -- NOTE: Comment removed, the top / bottom Code changed to turnaround code.
++ */
++
++/***************************************************************************
++ *                                                                         *
++ *   This program is free software; you can redistribute it and/or modify  *
++ *   it under the terms of the GNU General Public License as published by  *
++ *   the Free Software Foundation; either version 2 of the License, or     *
++ *   (at your option) any later version.                                   *
++ *                                                                         *
++ ***************************************************************************/
++/* 
++	Rewritten from Original .bin linking to compiler system by Lehner Franz (franz@caos.at) 
++	Rewritten to Dual Boot concept for 2BL loading
++	New written CPU Inits by Lehner Franz (franz@caos.at) 
++	Written New Working Xcodes + Xcode compiler by Lehner Franz (franz@caos.at) 
++	Focus support by Lehner Franz (franz@caos.at) 
++	Xcalibur support by Lehner Franz (franz@caos.at) 
++*/
++ 
++	//The bytecode interpreter begins here
++	xcode_pciout(0x80000884, 0x00008001);
++	xcode_pciout(0x80000810, 0x00008001);	
++	xcode_pciout(0x80000804, 0x00000003);
++	xcode_outb(0x00008049, 0x00000008);
++	xcode_outb(0x000080d9, 0x00000000);
++	xcode_outb(0x00008026, 0x00000001);
++	xcode_pciout(0x8000f04c, 0x00000001);
++	xcode_pciout(0x8000f018, 0x00010100);
++	xcode_pciout(0x80000084, 0x07ffffff);
++	
++	xcode_pciout(0x8000f020, 0x0ff00f00);
++	xcode_pciout(0x8000f024, 0xf7f0f000);
++	xcode_pciout(0x80010010, 0x0f000000);
++	xcode_pciout(0x80010014, 0xf0000000);
++	xcode_pciout(0x80010004, 0x00000007);
++	xcode_pciout(0x8000f004, 0x00000007);
++
++#ifndef MCPXREVD5
++	xcode_poke(0x0f0010b0, 0x07633461);
++#else
++	xcode_poke(0x0f0010b0, 0x01000010);
++#endif
++
++	xcode_poke(0x0f0010cc, 0x66660000);
++
++	xcode_peek(0x0f101000);
++	
++	xcode_bittoggle(0x000c0000,0x00000000);
++
++	xcode_ifgoto(0x00000000,6);
++	
++	xcode_peek(0x0f101000);
++	
++	xcode_bittoggle(0xe1f3ffff,0x80000000);
++
++	
++	xcode_poke_a(0x0f101000);
++	xcode_poke(0x0f0010b8, 0xeeee0000);
++	xcode_goto(11);
++	
++	xcode_ifgoto(0x000c0000,6);
++
++	xcode_peek(0x0f101000);
++	xcode_bittoggle(0xe1f3ffff,0x860c0000);
++	xcode_poke_a(0x0f101000);
++	
++	xcode_poke(0x0f0010b8, 0xffff0000);
++        xcode_goto(5);
++	xcode_peek(0x0f101000);
++	
++	xcode_bittoggle(0xe1f3ffff,0x820c0000);
++	xcode_poke_a(0x0f101000);
++	xcode_poke(0x0f0010b8, 0x11110000);
++	xcode_poke(0x0f0010d4, 0x00000009);
++	xcode_poke(0x0f0010b4, 0x00000000);
++	xcode_poke(0x0f0010bc, 0x00005866);
++	xcode_poke(0x0f0010c4, 0x0351c858);
++	xcode_poke(0x0f0010c8, 0x30007d67);
++	xcode_poke(0x0f0010d8, 0x00000000);
++	xcode_poke(0x0f0010dc, 0xa0423635);
++	xcode_poke(0x0f0010e8, 0x0c6558c6);
++	xcode_poke(0x0f100200, 0x03070103);
++	xcode_poke(0x0f100410, 0x11000016);
++	xcode_poke(0x0f100330, 0x84848888);
++	xcode_poke(0x0f10032c, 0xffffcfff);
++	xcode_poke(0x0f100328, 0x00000001);
++	xcode_poke(0x0f100338, 0x000000df);
++	
++	// Set up the SM - bus controller
++	xcode_pciout(0x80000904, 0x00000001);
++	xcode_pciout(0x80000914, 0x0000c001);
++	xcode_pciout(0x80000918, 0x0000c201);
++	xcode_outb(0x0000c200, 0x00000070);
++	
++	
++	//VIDEO INIT CODE
++	/* It is necessary to write to the video encoder, as the PIC
++	snoops the I2C traffic and will reset us if it doesn't see what 
++	it judges as 'appropriate' traffic.  Conexant is the most urgent,
++	as on 1.0 Xboxes, the PIC was very strict and reset us earlier
++	than later models 
++	*/
++
++	//CONEXANT START
++	//Set conexant address
++	xcode_outb(0x0000c004, 0x0000008a);
++	xcode_outb(SMBUS+8, 0x000000ba);
++	xcode_outb(SMBUS+6, 0x0000003f);
++	xcode_outb(SMBUS+2, 0x0000000a);
++				
++	xcode_inb(SMBUS);
++	xcode_ifgoto(0x00000010,2); //Write failed, forward 2
++	xcode_goto(4); //Success, skip to next conexant write.
++	xcode_bittoggle(0x00000008, 0x00000000); //Check fail status
++	xcode_ifgoto(0x00000000,-4); //No result yet, read again.
++	xcode_goto(39);	//Write failed, on to Focus
++	xcode_outb(SMBUS, 0x00000010); //Next conexant write.
++	//I2CTransmitWord(0x45,0x6c46);
++	SMB_xcode_Write(0x6c,0x46);		// +6
++
++	//Are these REALLY needed to keep the PIC happy?
++	//I2CTransmitWord(0x45,0xb800);
++	SMB_xcode_Write(0xb8,0x00);		// +6
++	//I2CTransmitWord(0x45,0xce19);
++	SMB_xcode_Write(0xce,0x19);		// +6
++	//I2CTransmitWord(0x45,0xc69c);
++	SMB_xcode_Write(0xc6,0x9c);		// +6
++	//I2CTransmitWord(0x45,0x3208);
++	SMB_xcode_Write(0x32,0x08);		// +6
++	//I2CTransmitWord(0x45,0xc401);
++	SMB_xcode_Write(0xc4,0x01);		// +6
++
++	xcode_goto(36); //Video complete -> VIDEND 
++
++
++	//FOCUS START
++	//Clear the error from the previous attempts
++	xcode_outb(SMBUS, 0x000000ff);
++	xcode_outb(SMBUS, 0x00000010);
++	
++	//Set focus address
++	xcode_outb(0x0000c004, 0x000000d4);
++	//I2CTransmitWord(0x6a,0x0c00);
++	xcode_outb(SMBUS+8, 0x0000000c);
++	xcode_outb(SMBUS+6, 0x00000000);
++	xcode_outb(SMBUS+2, 0x0000000a);
++        xcode_inb(SMBUS);
++	xcode_ifgoto(0x00000010,2); //Write failed, forward 2
++	xcode_goto(4); //Success, skip to next focus write.
++	xcode_bittoggle(0x00000008, 0x00000000); //Check fail status
++	xcode_ifgoto(0x00000000,-4); //No result yet, read again.
++	xcode_goto(9);	//Write failed, on to Xcalibur
++	xcode_outb(SMBUS, 0x00000010); //Next focus write.
++	//I2CTransmitWord(0x6a,0x0d20);
++	SMB_xcode_Write(0x0d,0x20);	 
++	xcode_goto(16); //video complete -> VIDEND
++
++	//XCALIBUR START	
++	/* We don't check to see if these writes fail, as
++	we've already tried Conexant and Focus - Oh dear,
++	not another encoder...  :(    
++	*/
++
++	//Clear the error from the previous attempts
++	xcode_outb(SMBUS, 0x000000ff);
++	xcode_outb(SMBUS, 0x00000010);
++	
++	xcode_outb(0x0000c004, 0x000000E0);
++	//I2CTransmitWord(0x70,0x00);
++	SMB_xcode_Write(0x0,0x0);		// +6
++	//I2CTransmitWord(0x70,0x00);
++	SMB_xcode_Write(0xb8,0x00);		// +6	
++
++	
++	//VIDEND - Encoder 'init' complete.
++
++        // PIC SLAVE Address (Write)
++	xcode_outb(SMBUS+4, 0x00000020);
++        // I2Ctransmit(0x20,0x1,0x0);
++	SMB_xcode_Write(0x01,0x00);		// +6
++
++	// PIC SLAVE Address (Read)
++	xcode_outb(SMBUS+4, 0x00000021);
++
++	// I2Cgetbyte(0x8a,0x1);
++	xcode_outb(SMBUS+8, 0x00000001);
++	xcode_outb(SMBUS+2, 0x0000000a);
++        xcode_inb(SMBUS);
++        xcode_ifgoto(0x00000010,-1)
++        xcode_outb(SMBUS, 0x00000010);
++
++
++	// If SMC version does not match ... ?????
++	xcode_inb(SMBUS+6);
++	
++	xcode_poke(0x0f680500, 0x00011c01);
++	xcode_poke(0x0f68050c, 0x000a0400);
++	xcode_poke(0x0f001220, 0x00000000);
++	xcode_poke(0x0f001228, 0x00000000);
++	xcode_poke(0x0f001264, 0x00000000);
++	xcode_poke(0x0f001210, 0x00000010);
++	xcode_peek(0x0f101000);
++	xcode_bittoggle(0x06000000,0x00000000);
++	xcode_ifgoto(0x00000000,4);
++	xcode_poke(0x0f001214, 0x48480848);
++	xcode_poke(0x0f00122c, 0x88888888);
++	xcode_goto(7);
++	xcode_ifgoto(0x06000000,4);
++	xcode_poke(0x0f001214, 0x09090909);
++	xcode_poke(0x0f00122c, 0xaaaaaaaa);
++	xcode_goto(3);
++     
++	xcode_poke(0x0f001214, 0x09090909);
++	xcode_poke(0x0f00122c, 0xaaaaaaaa);
++	xcode_poke(0x0f001230, 0xffffffff);
++	xcode_poke(0x0f001234, 0xaaaaaaaa);
++	xcode_poke(0x0f001238, 0xaaaaaaaa);
++	xcode_poke(0x0f00123c, 0x8b8b8b8b);
++	xcode_poke(0x0f001240, 0xffffffff);
++	xcode_poke(0x0f001244, 0x8b8b8b8b);
++	xcode_poke(0x0f001248, 0x8b8b8b8b);
++	xcode_poke(0x0f1002d4, 0x00000001);
++	xcode_poke(0x0f1002c4, 0x00100042);
++	xcode_poke(0x0f1002cc, 0x00100042);
++	xcode_poke(0x0f1002c0, 0x00000011);
++	xcode_poke(0x0f1002c8, 0x00000011);
++	xcode_poke(0x0f1002c0, 0x00000032);
++	xcode_poke(0x0f1002c8, 0x00000032);
++	xcode_poke(0x0f1002c0, 0x00000132);
++	xcode_poke(0x0f1002c8, 0x00000132);
++	xcode_poke(0x0f1002d0, 0x00000001);
++	xcode_poke(0x0f1002d0, 0x00000001);
++	xcode_poke(0x0f100210, 0x80000000);
++	xcode_poke(0x0f00124c, 0xaa8baa8b);
++	xcode_poke(0x0f001250, 0x0000aa8b);
++	xcode_poke(0x0f100228, 0x081205ff);
++
++	xcode_poke(0x0f001218, 0x00010000);
++
++
++	xcode_pciin_a(0x80000860);
++	xcode_bittoggle(0xffffffff,0x00000400);   
++	xcode_pciout_a(0x80000860);
++
++	xcode_pciout(0x8000084c, 0x0000fdde);
++	xcode_pciout(0x8000089c, 0x871cc707);
++	xcode_pciin_a(0x800008b4);
++	xcode_bittoggle(0xfffff0ff,0x00000f00);
++	xcode_pciout_a(0x800008b4);
++	xcode_pciout(0x80000340, 0xf0f0c0c0);
++	xcode_pciout(0x80000344, 0x00c00000);
++	xcode_pciout(0x8000035c, 0x04070000);
++	xcode_pciout(0x8000036c, 0x00230801);
++	xcode_pciout(0x8000036c, 0x01230801);
++	xcode_goto(1);
++	xcode_goto(1);
++	xcode_poke(0x0f100200, 0x03070103);
++	xcode_poke(0x0f100204, 0x11448000);
++	xcode_pciout(0x8000103c, 0x00000000);
++
++
++	xcode_outb(SMBUS, 0x00000010);
++	
++	/* ----  Report Memory Size to PIC scratch register ---- */
++        
++        // We emulate Good memory result to PIC
++
++	//xcode_pciin_a(0x8000183c);
++	//xcode_bittoggle(0x000000ff,0x00000000);
++	//xcode_outb_a(SMBUS+6);
++
++
++	xcode_outb(SMBUS+4, 0x00000020);
++
++	SMB_xcode_Write(0x13,0x0f);		// +6
++	SMB_xcode_Write(0x12,0xf0);		// +6		
++
++	/* ---- Reload Nvidia Registers  ------------------------*/
++	
++	xcode_pciout(0x8000f020, 0xfdf0fd00);
++	xcode_pciout(0x80010010, 0xfd000000);
++	
++	
++	// overflow trick
++	xcode_poke(0x00000000, 0xfc1000ea);
++	xcode_poke(0x00000004, 0x000008ff);
++
++       	xcode_END(0x806);
+diff --git a/board/microsoft/xbox/boot-sector.S b/board/microsoft/xbox/boot-sector.S
+new file mode 100644
+index 0000000000..375e821e75
+--- /dev/null
++++ b/board/microsoft/xbox/boot-sector.S
+@@ -0,0 +1,35 @@
++.section .decoy_boot, "ad"
++decoy_boot_sector:
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fe00
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fe10
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fe20
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fe30
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fe40
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fe50
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fe60
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fe70
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fe80
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fe90
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fea0
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3feb0
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fec0
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fed0
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fee0
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3fef0
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3ff00
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3ff10
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3ff20
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3ff30
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3ff40
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3ff50
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3ff60
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3ff70
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3ff80
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3ff90
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3ffa0
++.byte 0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90	//3ffb0
++.ascii "AUTO"
++.byte 0x01,0x7f,0x03,0x90,0x90,0x90,0x90,0x90
++.long 0x40000
++.ascii "u-boot 2018.01                  "
++.byte 0x90,0x90,0x90,0x90,0x18,0x00,0xd8,0xff,0xff,0xff,0x90,0x90,0x90,0x90,0x90,0x90	//3fff0
+diff --git a/board/microsoft/xbox/boot.S b/board/microsoft/xbox/boot.S
+new file mode 100644
+index 0000000000..80e5d52640
+--- /dev/null
++++ b/board/microsoft/xbox/boot.S
+@@ -0,0 +1,221 @@
++/*
++ * Copyright (C) 2015, Bin Meng <bmeng.cn@gmail.com>
++ *
++ * SPDX-License-Identifier:	GPL-2.0+
++ */
++
++#include "2bconsts.h"
++
++#define xcode_peek(val1) .byte 0x2; .long val1 ; .long 0x0 ;
++#define xcode_poke(val1,val2) .byte 0x3; .long val1 ; .long val2 ;
++#define xcode_pciout(val1,val2) .byte 0x4; .long val1 ; .long val2 ;
++#define xcode_pciin_a(val1) .byte 0x5; .long val1 ; .long 0x0 ;
++
++#define xcode_bittoggle(val1,val2) .byte 0x6; .long val1 ; .long val2 ;
++
++#define xcode_ifgoto(val1,val2) .byte 0x8; .long val1 ; .long (9*(val2-1)) ;
++
++#define xcode_outb(val1,val2) .byte 0x11; .long val1 ; .long val2 ;			    
++#define xcode_inb(val1) .byte 0x12; .long val1 ; .long 0x0 ;			    
++
++#define xcode_poke_a(val1) .byte 0x7; .long 0x3; .long val1 ;  
++#define xcode_pciout_a(val1) .byte 0x7; .long 0x4; .long val1 ;  
++#define xcode_outb_a(val1) .byte 0x7; .long 0x11; .long val1 ;  
++
++#define xcode_goto(val1) .byte 0x9; .long 0x0; .long (9*(val1-1));
++
++#define xcode_END(val1) .byte 0xEE; .long val1 ; .long 0x0;
++
++#define SMBUS 		0x0000c000
++
++
++#define SMB_xcode_Write(val1,val2); 	xcode_outb(SMBUS+8, val1); \
++					xcode_outb(SMBUS+6, val2); \
++					xcode_outb(SMBUS+2, 0x0000000a); \
++        				xcode_inb(SMBUS); \
++        				xcode_ifgoto(0x00000010,-1); \
++					xcode_outb(SMBUS, 0x00000010); 
++
++.org 0x0
++	/* MCPX Magic Values - clock timings*/
++	
++	.long 0xff000009
++	.long 0xff000008
++	.long 0x2b16d065
++	.long 0x3346322d
++	.long 0x01010101
++	.long 0x08080808
++	.long 0x00000801
++
++	#ifndef MCPXREVD5
++	.long 0xc8fc7c8a	// MCPX =< D5
++	.long 0x44290213
++	.long 0x90004998		
++	.long 0x00000000
++	#else
++	.long 0xc8b4588a	// MCPX 1.6 > D5
++	.long 0x00100000
++	.long 0x00050aa7
++	.long 0xf0000000
++	#endif
++
++	.long 0xffffffff
++	.long 0xffffffff
++	
++	.org 0x40
++	.long 0			// This number will be overwritten  
++				// With imagebld, but we need a temp value
++	
++	.org 0x6c
++	.long 0x00000107
++	
++	.org 0x70		// MCPX Config Area
++	.long 0x0000000f
++	.long 0x40004400
++	
++	#ifndef MCPXREVD5
++	.long 0x12d10070
++	.long 0x00000c90
++	#else
++	.long 0x16ce0090
++	.long 0x00000dc0	
++	#endif
++
++
++//The bytecode interpreter begins here
++//the xcodes section belongs at offset 0x80 in the bios file
++.org 0x80
++xcodes:
++#include "Xcodes.h"
++	// Note: never change this from offset 0x1000 ....
++	// This is the Main Entry point ....        
++.org 0x1000
++xbox_start:
++       	// Good Morning CPU
++
++	// NOTE:
++	/*
++		We come here form the high rom section Jump
++	*/
++	
++        // Clear Intel Interrupts in Processor Register
++	// Everytime very good, specially when comming out of a running envoronment
++		
++	movl	$0x1b, %ecx
++	xor	%eax, %eax
++	xor	%edx, %edx
++	wrmsr
++        
++	// Interrupts now Dead
++
++	xor	%eax, %eax
++	xor	%edx, %edx
++	xor	%ecx, %ecx
++	
++	// kill the cache  = Disable bit 30 + 29 = CD + NW 
++	// CD = Cache Disable (disable = 1)
++	// NW Not write through (disable = 1)
++       	mov 	%cr0, %eax
++	orl	$0x60000000, %eax
++	mov	%eax, %cr0
++	wbinvd
++
++	// We clear the cr3 register
++	mov	%eax, %eax
++	mov	%eax, %cr3
++
++	// Clear Memory Type register
++	movl	$0x2ff, %ecx
++	xor	%eax, %eax
++	xor	%edx, %edx
++	wrmsr
++
++/*
++  We are setting the Ram Init's now to set up the Regions in the Ram
++
++*/ 
++
++	// MTRR for RAM
++	// from address 0, Writeback Caching, 128MB range
++        movl	$0x200, %ecx
++	movl	$0x00000000, %edx
++	movl	$0x00000006, %eax 	// == WB_CACHE == 6
++	//movl	$0x00000004, %eax 	// Temporary, as USB development
++	wrmsr
++
++	// MASK0 set to 0xf8000[000] == 128M
++        movl	$0x201, %ecx
++	movl	$0x0000000f, %edx
++	movl	$0xf8000800, %eax
++	wrmsr
++
++	// MTRR for shadow RAM
++	// from address 0xf0000000, Write-combining Caching, 128MB range
++        movl	$0x202, %ecx
++	movl	$0x00000000, %edx
++	movl	$0xf0000001, %eax 	// Write-Combining == 1
++	wrmsr
++
++	// MASK0 set to 0xf8000[000] == 128M
++        movl	$0x203, %ecx
++	movl	$0x0000000f, %edx
++	movl	$0xf8000800, %eax
++	wrmsr
++
++     // MTRR for FLASH
++	movl	$0x204, %ecx
++	movl	$0x00000000, %edx
++	movl	$0xFff00000, %eax 	    // We set to Uncacheable
++	wrmsr
++
++        movl	$0x205, %ecx
++	movl	$0x0000000f, %edx
++	movl	$0xfff00800, %eax
++	wrmsr
++	
++
++        xor	%eax, %eax
++	xor	%edx, %edx
++
++	movl	$0x206, %ecx		// IA32_MTRR_PHYS Base 3
++        wrmsr
++	movl	$0x207, %ecx		// IA32_MTRR_PHYS_MASK 3
++        wrmsr
++
++	movl	$0x208, %ecx		// IA32_MTRR_PHYS Base 4
++        wrmsr                                                   
++	movl	$0x209, %ecx		// IA32_MTRR_PHYS_MASK 4
++        wrmsr                                                   
++
++	movl	$0x20a, %ecx		// IA32_MTRR_PHYS Base 5
++        wrmsr                                                   
++	movl	$0x20b, %ecx		// IA32_MTRR_PHYS_MASK 5
++        wrmsr                                                   
++
++	movl	$0x20c, %ecx		// IA32_MTRR_PHYS Base 6
++        wrmsr                                                   
++	movl	$0x20d, %ecx		// IA32_MTRR_PHYS_MASK 6
++        wrmsr
++
++	movl	$0x20e, %ecx		// IA32_MTRR_PHYS Base 7
++        wrmsr
++	movl	$0x20f, %ecx		// IA32_MTRR_PHYS_MASK 7
++        wrmsr                                                   
++                                              
++
++	// Define Memory in IA32_MTRR_DEF_TYPE
++	movl	$0x2ff, %ecx
++	xor	%edx, %edx
++	movl	$0x800, %eax //Enable MTRRs
++	wrmsr
++
++	/* turn on normal cache */
++	//  bit 30 + 29 = CD + NW 
++	// CD = Cache Disable (disable = 1)
++	// NW Not write through (disable = 1)
++	movl	%cr0, %eax
++	mov 	%eax, %ebx
++	andl	$0x9FFFFFFF,%eax
++	movl	%eax, %cr0
++
++        cld
+diff --git a/board/microsoft/xbox/car.S b/board/microsoft/xbox/car.S
+new file mode 100644
+index 0000000000..67141cb922
+--- /dev/null
++++ b/board/microsoft/xbox/car.S
+@@ -0,0 +1,10 @@
++/*
++ * Copyright (C) 2015, Bin Meng <bmeng.cn@gmail.com>
++ *
++ * SPDX-License-Identifier:	GPL-2.0+
++ */
++
++.globl car_init
++car_init:
++	
++	jmp	car_init_ret
+diff --git a/board/microsoft/xbox/dram.c b/board/microsoft/xbox/dram.c
+new file mode 100644
+index 0000000000..a5be543cb0
+--- /dev/null
++++ b/board/microsoft/xbox/dram.c
+@@ -0,0 +1,35 @@
++/*
++ * Copyright (C) 2015, Bin Meng <bmeng.cn@gmail.com>
++ *
++ * SPDX-License-Identifier:	GPL-2.0+
++ */
++
++#include <common.h>
++#include <asm/post.h>
++
++DECLARE_GLOBAL_DATA_PTR;
++
++int dram_init(void)
++{
++
++	return 0;
++}
++
++int dram_init_banksize(void)
++{
++
++	return 0;
++}
++
++/*
++ * This function looks for the highest region of memory lower than 4GB which
++ * has enough space for U-Boot where U-Boot is aligned on a page boundary.
++ * It overrides the default implementation found elsewhere which simply
++ * picks the end of ram, wherever that may be. The location of the stack,
++ * the relocation address, and how far U-Boot is moved by relocation are
++ * set in the global data structure.
++ */
++ulong board_get_usable_ram_top(ulong total_size)
++{
++	return gd->ram_size;
++}
+diff --git a/board/microsoft/xbox/start.S b/board/microsoft/xbox/start.S
+new file mode 100644
+index 0000000000..6a56c5749d
+--- /dev/null
++++ b/board/microsoft/xbox/start.S
+@@ -0,0 +1,30 @@
++/*
++ * Copyright (C) 2015, Bin Meng <bmeng.cn@gmail.com>
++ *
++ * SPDX-License-Identifier:	GPL-2.0+
++ */
++
++.globl early_board_init
++early_board_init:
++	mov	$0x8, %al
++	mov	$0x61, %dx
++	out	%al, %dx
++
++	// Enable IDE and NIC
++	mov 	$0x8000088C, %eax 
++	movw 	$0xcf8, %dx 
++	outl	%eax, %dx 
++	movw 	$0xcfc, %dx 
++	movl 	$0x40000000, %eax 
++	outl	%eax, %dx
++	
++      	
++	// CPU Whoami   ? sesless ?
++	mov 	$0x80000080, %eax 
++	movw 	$0xcf8, %dx 
++	outl	%eax, %dx 
++	movw 	$0xcfc, %dx 
++	movl 	$0x100, %eax 
++	outl	%eax, %dx 
++
++	jmp	early_board_init_ret
+diff --git a/board/microsoft/xbox/xbox.c b/board/microsoft/xbox/xbox.c
+new file mode 100644
+index 0000000000..3852449a75
+--- /dev/null
++++ b/board/microsoft/xbox/xbox.c
+@@ -0,0 +1,106 @@
++/*
++ * Copyright (C) 2015, Bin Meng <bmeng.cn@gmail.com>
++ *
++ * SPDX-License-Identifier:	GPL-2.0+
++ */
++
++#include <common.h>
++#include <pci.h>
++#include <qfw.h>
++#include <asm/io.h>
++#include <asm/irq.h>
++#include <asm/post.h>
++#include <asm/processor.h>
++
++#include "2bconsts.h"
++
++u32 PciWriteDword(unsigned int bus, unsigned int dev, unsigned int func, unsigned int reg_off, unsigned int dw) 
++{
++		
++	u32 base_addr = 0x80000000;
++	base_addr |= ((bus & 0xFF) << 16);	// bus #
++	base_addr |= ((dev & 0x1F) << 11);	// device #
++	base_addr |= ((func & 0x07) << 8);	// func #
++	base_addr |= ((reg_off & 0xff));
++
++	writel(0xcf8, base_addr );	
++	writel(0xcfc ,dw);
++
++	return 0;    
++}
++
++u32 PciReadDword(unsigned int bus, unsigned int dev, unsigned int func, unsigned int reg_off)
++{
++	u32 base_addr = 0x80000000;
++	base_addr |= ((bus & 0xFF) << 16);	// bus #
++	base_addr |= ((dev & 0x1F) << 11);	// device #
++	base_addr |= ((func & 0x07) << 8);	// func #
++        base_addr |= ((func & 0x07) << 8);
++        base_addr |= ((reg_off & 0xff));
++        
++	writel(0xcf8, base_addr);
++	return readl(0xcfc);
++}
++
++void BootAGPBUSInitialization(void)
++{
++	u32 temp;
++	PciWriteDword(BUS_0, DEV_1, FUNC_0, 0x54,   PciReadDword(BUS_0, DEV_1, FUNC_0, 0x54) | 0x88000000 );
++	
++	PciWriteDword(BUS_0, DEV_0, FUNC_0, 0x64,   (PciReadDword(BUS_0, DEV_0, FUNC_0, 0x64))| 0x88000000 );
++	
++	temp =  PciReadDword(BUS_0, DEV_0, FUNC_0, 0x6C);
++	writel(0xcfc , temp & 0xFFFFFFFE);
++	writel(0xcfc , temp );
++	
++	PciWriteDword(BUS_0, DEV_0, FUNC_0, 0x80, 0x00000100);
++    
++}
++
++int arch_cpu_init(void)
++{
++	post_code(POST_CPU_INIT);
++	BootPerformPicChallengeResponseAction();
++	// Sets the Graphics Card to 60 MB start address
++        (*(unsigned int*)0xFD600800) = (0xf0000000 | ((64*0x100000) - 0x00400000));
++        
++	BootAGPBUSInitialization();
++
++	(*(unsigned int*)(0xFD000000 + 0x100200)) = 0x03070103 ;
++	(*(unsigned int*)(0xFD000000 + 0x100204)) = 0x11448000 ;
++        
++	PciWriteDword(BUS_0, DEV_0, FUNC_0, 0x84, 0x7FFFFFF); // 128 MB
++	return x86_cpu_init_f();
++}
++
++#if !CONFIG_IS_ENABLED(EFI_STUB) && \
++	!CONFIG_IS_ENABLED(SPL_X86_32BIT_INIT)
++
++int checkcpu(void)
++{
++	return 0;
++}
++
++int print_cpuinfo(void)
++{
++	post_code(POST_CPU_INFO);
++	return default_print_cpuinfo();
++}
++#endif
++
++void reset_cpu(ulong addr)
++{
++	/* cold reset */
++	x86_full_reset();
++}
++
++int arch_early_init_r(void)
++{
++	return 0;
++}
++
++int board_early_init_f(void)
++{
++	return 0;
++}
++
+diff --git a/configs/microsoft-xbox_defconfig b/configs/microsoft-xbox_defconfig
+new file mode 100644
+index 0000000000..4ddaeea38a
+--- /dev/null
++++ b/configs/microsoft-xbox_defconfig
+@@ -0,0 +1,859 @@
++#
++# Automatically generated file; DO NOT EDIT.
++# U-Boot 2018.01 Configuration
++#
++CONFIG_CREATE_ARCH_SYMLINK=y
++# CONFIG_ARC is not set
++# CONFIG_ARM is not set
++# CONFIG_M68K is not set
++# CONFIG_MICROBLAZE is not set
++# CONFIG_MIPS is not set
++# CONFIG_NDS32 is not set
++# CONFIG_NIOS2 is not set
++# CONFIG_PPC is not set
++# CONFIG_SANDBOX is not set
++# CONFIG_SH is not set
++CONFIG_X86=y
++# CONFIG_XTENSA is not set
++CONFIG_SYS_ARCH="x86"
++CONFIG_SYS_VENDOR="microsoft"
++CONFIG_SYS_BOARD="xbox"
++CONFIG_SYS_CONFIG_NAME="microsoft-xbox"
++CONFIG_SYS_TEXT_BASE=0xfffc0000
++CONFIG_SYS_MALLOC_F_LEN=0x800
++CONFIG_IDENT_STRING=""
++
++#
++# x86 architecture
++#
++CONFIG_X86_RUN_32BIT=y
++# CONFIG_X86_RUN_64BIT is not set
++# CONFIG_VENDOR_ADVANTECH is not set
++# CONFIG_VENDOR_CONGATEC is not set
++# CONFIG_VENDOR_COREBOOT is not set
++# CONFIG_VENDOR_DFI is not set
++# CONFIG_VENDOR_EFI is not set
++# CONFIG_VENDOR_EMULATION is not set
++# CONFIG_VENDOR_GOOGLE is not set
++# CONFIG_VENDOR_INTEL is not set
++CONFIG_VENDOR_MICROSOFT=y
++# CONFIG_INTEL_MID is not set
++CONFIG_PCIE_ECAM_BASE=0xe0000000
++CONFIG_DEFAULT_DEVICE_TREE="xbox"
++CONFIG_SYS_CAR_ADDR=0x1dfff0
++CONFIG_SYS_CAR_SIZE=0x20004
++CONFIG_ROM_TABLE_ADDR=0xf0000
++CONFIG_ROM_TABLE_SIZE=0x10000
++CONFIG_SMBIOS_PRODUCT_NAME="qemu-x86"
++CONFIG_TARGET_XBOX=y
++# CONFIG_DEBUG_UART is not set
++CONFIG_CPU_ADDR_BITS=36
++CONFIG_AHCI=y
++CONFIG_RAMBASE=0x100000
++CONFIG_HPET_ADDRESS=0xfed00000
++# CONFIG_SMM_TSEG is not set
++# CONFIG_X86_RESET_VECTOR is not set
++CONFIG_X86_LOAD_FROM_32_BIT=y
++# CONFIG_HAVE_INTEL_ME is not set
++# CONFIG_X86_RAMTEST is not set
++# CONFIG_HAVE_FSP is not set
++# CONFIG_ENABLE_MRC_CACHE is not set
++# CONFIG_HAVE_MRC is not set
++# CONFIG_HAVE_REFCODE is not set
++# CONFIG_SMP is not set
++# CONFIG_HAVE_VGA_BIOS is not set
++
++#
++# System tables
++#
++# CONFIG_GENERATE_PIRQ_TABLE is not set
++# CONFIG_GENERATE_SFI_TABLE is not set
++# CONFIG_GENERATE_MP_TABLE is not set
++# CONFIG_GENERATE_ACPI_TABLE is not set
++# CONFIG_HAVE_ACPI_RESUME is not set
++CONFIG_MAX_PIRQ_LINKS=8
++CONFIG_IRQ_SLOT_COUNT=128
++CONFIG_PCIE_ECAM_SIZE=0x10000000
++CONFIG_I8259_PIC=y
++CONFIG_I8254_TIMER=y
++# CONFIG_SEABIOS is not set
++
++#
++# General setup
++#
++CONFIG_LOCALVERSION=""
++CONFIG_LOCALVERSION_AUTO=y
++CONFIG_CC_OPTIMIZE_FOR_SIZE=y
++# CONFIG_DISTRO_DEFAULTS is not set
++CONFIG_SYS_MALLOC_F=y
++CONFIG_SPL_SYS_MALLOC_F_LEN=0x800
++CONFIG_TPL_SYS_MALLOC_F_LEN=0x800
++CONFIG_EXPERT=y
++CONFIG_SYS_MALLOC_CLEAR_ON_INIT=y
++# CONFIG_TOOLS_DEBUG is not set
++# CONFIG_PHYS_64BIT is not set
++CONFIG_BUILD_ROM=y
++
++#
++# Boot images
++#
++# CONFIG_ANDROID_BOOT_IMAGE is not set
++# CONFIG_FIT is not set
++# CONFIG_OF_BOARD_SETUP is not set
++# CONFIG_OF_SYSTEM_SETUP is not set
++# CONFIG_OF_STDOUT_VIA_ALIAS is not set
++CONFIG_SYS_EXTRA_OPTIONS=""
++CONFIG_ARCH_FIXUP_FDT_MEMORY=y
++
++#
++# API
++#
++# CONFIG_API is not set
++
++#
++# Boot timing
++#
++# CONFIG_BOOTSTAGE is not set
++CONFIG_BOOTSTAGE_RECORD_COUNT=30
++CONFIG_SPL_BOOTSTAGE_RECORD_COUNT=5
++CONFIG_BOOTSTAGE_STASH_ADDR=0
++CONFIG_BOOTSTAGE_STASH_SIZE=0x1000
++
++#
++# Boot media
++#
++# CONFIG_NAND_BOOT is not set
++# CONFIG_ONENAND_BOOT is not set
++# CONFIG_QSPI_BOOT is not set
++# CONFIG_SATA_BOOT is not set
++# CONFIG_SD_BOOT is not set
++# CONFIG_SPI_BOOT is not set
++CONFIG_USE_BOOTARGS=y
++CONFIG_BOOTARGS=""
++# CONFIG_USE_BOOTCOMMAND is not set
++
++#
++# Console
++#
++# CONFIG_CONSOLE_RECORD is not set
++CONFIG_LOGLEVEL=4
++CONFIG_SPL_LOGLEVEL=4
++# CONFIG_SILENT_CONSOLE is not set
++# CONFIG_PRE_CONSOLE_BUFFER is not set
++CONFIG_CONSOLE_MUX=y
++CONFIG_SYS_CONSOLE_IS_IN_ENV=y
++# CONFIG_SYS_CONSOLE_OVERWRITE_ROUTINE is not set
++# CONFIG_SYS_CONSOLE_ENV_OVERWRITE is not set
++# CONFIG_SYS_CONSOLE_INFO_QUIET is not set
++# CONFIG_SYS_STDIO_DEREGISTER is not set
++
++#
++# Logging
++#
++# CONFIG_LOG is not set
++# CONFIG_SPL_LOG is not set
++CONFIG_DEFAULT_FDT_FILE=""
++# CONFIG_VERSION_VARIABLE is not set
++CONFIG_DISPLAY_CPUINFO=y
++CONFIG_DISPLAY_BOARDINFO=y
++
++#
++# Start-up hooks
++#
++CONFIG_ARCH_EARLY_INIT_R=y
++# CONFIG_ARCH_MISC_INIT is not set
++CONFIG_BOARD_EARLY_INIT_F=y
++
++#
++# Security support
++#
++CONFIG_HASH=y
++
++#
++# SPL / TPL
++#
++
++#
++# Command line interface
++#
++CONFIG_CMDLINE=y
++# CONFIG_HUSH_PARSER is not set
++CONFIG_SYS_PROMPT="=> "
++
++#
++# Autoboot options
++#
++# CONFIG_AUTOBOOT is not set
++CONFIG_AUTOBOOT_KEYED=y
++CONFIG_AUTOBOOT_PROMPT="Autoboot in %d seconds\n"
++# CONFIG_AUTOBOOT_ENCRYPTION is not set
++CONFIG_AUTOBOOT_DELAY_STR=""
++CONFIG_AUTOBOOT_STOP_STR=""
++# CONFIG_AUTOBOOT_KEYED_CTRLC is not set
++
++#
++# FASTBOOT
++#
++
++#
++# Commands
++#
++
++#
++# Info commands
++#
++CONFIG_CMD_BDI=y
++# CONFIG_CMD_CONFIG is not set
++CONFIG_CMD_CONSOLE=y
++# CONFIG_CMD_CPU is not set
++# CONFIG_CMD_LICENSE is not set
++
++#
++# Boot commands
++#
++CONFIG_CMD_BOOTD=y
++CONFIG_CMD_BOOTM=y
++CONFIG_CMD_BOOTZ=y
++# CONFIG_CMD_BOOTEFI is not set
++# CONFIG_CMD_BOOTMENU is not set
++# CONFIG_CMD_ELF is not set
++CONFIG_CMD_FDT=y
++CONFIG_CMD_GO=y
++CONFIG_CMD_RUN=y
++# CONFIG_CMD_IMI is not set
++# CONFIG_CMD_IMLS is not set
++# CONFIG_CMD_XIMG is not set
++# CONFIG_CMD_POWEROFF is not set
++# CONFIG_CMD_THOR_DOWNLOAD is not set
++CONFIG_CMD_ZBOOT=y
++
++#
++# Environment commands
++#
++# CONFIG_CMD_ASKENV is not set
++CONFIG_CMD_EXPORTENV=y
++CONFIG_CMD_IMPORTENV=y
++CONFIG_CMD_EDITENV=y
++# CONFIG_CMD_GREPENV is not set
++CONFIG_CMD_SAVEENV=y
++CONFIG_CMD_ENV_EXISTS=y
++# CONFIG_CMD_ENV_CALLBACK is not set
++# CONFIG_CMD_ENV_FLAGS is not set
++
++#
++# Memory commands
++#
++CONFIG_CMD_CRC32=y
++# CONFIG_CRC32_VERIFY is not set
++# CONFIG_CMD_EEPROM is not set
++# CONFIG_LOOPW is not set
++# CONFIG_CMD_MD5SUM is not set
++# CONFIG_CMD_MEMINFO is not set
++CONFIG_CMD_MEMORY=y
++# CONFIG_CMD_MEMTEST is not set
++# CONFIG_CMD_MX_CYCLIC is not set
++# CONFIG_CMD_SHA1SUM is not set
++# CONFIG_CMD_STRINGS is not set
++
++#
++# Compression commands
++#
++# CONFIG_CMD_LZMADEC is not set
++# CONFIG_CMD_UNZIP is not set
++# CONFIG_CMD_ZIP is not set
++
++#
++# Device access commands
++#
++# CONFIG_CMD_ARMFLASH is not set
++# CONFIG_CMD_CLK is not set
++# CONFIG_CMD_DEMO is not set
++# CONFIG_CMD_DFU is not set
++CONFIG_CMD_DM=y
++# CONFIG_CMD_FDC is not set
++# CONFIG_CMD_FLASH is not set
++# CONFIG_CMD_FPGA is not set
++# CONFIG_CMD_FPGAD is not set
++# CONFIG_CMD_FUSE is not set
++# CONFIG_CMD_GPIO is not set
++# CONFIG_CMD_GPT is not set
++# CONFIG_RANDOM_UUID is not set
++# CONFIG_CMD_IDE is not set
++CONFIG_CMD_IO=y
++# CONFIG_CMD_IOTRACE is not set
++# CONFIG_CMD_I2C is not set
++CONFIG_CMD_LOADB=y
++CONFIG_CMD_LOADS=y
++# CONFIG_CMD_MMC is not set
++# CONFIG_CMD_NAND is not set
++# CONFIG_CMD_MMC_SPI is not set
++# CONFIG_CMD_ONENAND is not set
++# CONFIG_CMD_PART is not set
++# CONFIG_CMD_PCI is not set
++# CONFIG_CMD_PCMCIA is not set
++# CONFIG_CMD_READ is not set
++# CONFIG_CMD_SATA is not set
++# CONFIG_CMD_SAVES is not set
++# CONFIG_CMD_SDRAM is not set
++# CONFIG_CMD_SF is not set
++# CONFIG_CMD_SF_TEST is not set
++# CONFIG_CMD_SPI is not set
++# CONFIG_CMD_TSI148 is not set
++# CONFIG_CMD_UNIVERSE is not set
++# CONFIG_CMD_USB is not set
++# CONFIG_CMD_USB_SDP is not set
++# CONFIG_CMD_USB_MASS_STORAGE is not set
++
++#
++# Shell scripting commands
++#
++CONFIG_CMD_ECHO=y
++CONFIG_CMD_ITEST=y
++CONFIG_CMD_SOURCE=y
++CONFIG_CMD_SETEXPR=y
++
++#
++# Network commands
++#
++# CONFIG_CMD_NET is not set
++# CONFIG_CMD_TFTPPUT is not set
++# CONFIG_CMD_TFTPSRV is not set
++# CONFIG_CMD_RARP is not set
++# CONFIG_CMD_DHCP is not set
++# CONFIG_CMD_PXE is not set
++# CONFIG_CMD_NFS is not set
++# CONFIG_CMD_MII is not set
++# CONFIG_CMD_PING is not set
++# CONFIG_CMD_CDP is not set
++# CONFIG_CMD_SNTP is not set
++# CONFIG_CMD_DNS is not set
++# CONFIG_CMD_LINK_LOCAL is not set
++# CONFIG_CMD_ETHSW is not set
++
++#
++# Misc commands
++#
++# CONFIG_CMD_BMP is not set
++# CONFIG_CMD_BSP is not set
++CONFIG_CMD_BLOCK_CACHE=y
++# CONFIG_CMD_CACHE is not set
++# CONFIG_CMD_DISPLAY is not set
++# CONFIG_CMD_LED is not set
++CONFIG_CMD_DATE=y
++# CONFIG_CMD_TIME is not set
++CONFIG_CMD_GETTIME=y
++CONFIG_CMD_MISC=y
++# CONFIG_CMD_TIMER is not set
++# CONFIG_CMD_QFW is not set
++# CONFIG_CMD_TERMINAL is not set
++# CONFIG_CMD_UUID is not set
++
++#
++# Power commands
++#
++
++#
++# Security commands
++#
++# CONFIG_CMD_AES is not set
++# CONFIG_CMD_BLOB is not set
++# CONFIG_CMD_HASH is not set
++
++#
++# Firmware commands
++#
++
++#
++# Filesystem commands
++#
++# CONFIG_CMD_BTRFS is not set
++# CONFIG_CMD_EXT2 is not set
++# CONFIG_CMD_EXT4 is not set
++# CONFIG_CMD_FAT is not set
++# CONFIG_CMD_FS_GENERIC is not set
++# CONFIG_CMD_FS_UUID is not set
++# CONFIG_CMD_JFFS2 is not set
++# CONFIG_CMD_MTDPARTS is not set
++# CONFIG_CMD_REISER is not set
++# CONFIG_CMD_SCSI is not set
++# CONFIG_CMD_ZFS is not set
++
++#
++# Debug commands
++#
++# CONFIG_CMD_BEDBUG is not set
++# CONFIG_CMD_DIAG is not set
++CONFIG_CMD_IRQ=y
++# CONFIG_CMD_KGDB is not set
++# CONFIG_CMD_LOG is not set
++# CONFIG_CMD_TRACE is not set
++# CONFIG_CMD_UBI is not set
++
++#
++# Partition Types
++#
++CONFIG_PARTITIONS=y
++# CONFIG_MAC_PARTITION is not set
++CONFIG_DOS_PARTITION=y
++# CONFIG_ISO_PARTITION is not set
++# CONFIG_AMIGA_PARTITION is not set
++# CONFIG_EFI_PARTITION is not set
++# CONFIG_PARTITION_UUIDS is not set
++CONFIG_SUPPORT_OF_CONTROL=y
++CONFIG_DTC=y
++
++#
++# Device Tree Control
++#
++CONFIG_OF_CONTROL=y
++# CONFIG_OF_BOARD_FIXUP is not set
++# CONFIG_OF_LIVE is not set
++# CONFIG_OF_SEPARATE is not set
++CONFIG_OF_EMBED=y
++# CONFIG_OF_BOARD is not set
++# CONFIG_MULTI_DTB_FIT is not set
++CONFIG_MKIMAGE_DTC_PATH="dtc"
++
++#
++# Environment
++#
++CONFIG_ENV_IS_NOWHERE=y
++# CONFIG_ENV_IS_IN_EEPROM is not set
++# CONFIG_ENV_IS_IN_FAT is not set
++# CONFIG_ENV_IS_IN_FLASH is not set
++# CONFIG_ENV_IS_IN_MMC is not set
++# CONFIG_ENV_IS_IN_NAND is not set
++# CONFIG_ENV_IS_IN_NVRAM is not set
++# CONFIG_ENV_IS_IN_ONENAND is not set
++# CONFIG_ENV_IS_IN_REMOTE is not set
++# CONFIG_ENV_IS_IN_SPI_FLASH is not set
++# CONFIG_ENV_IS_IN_UBI is not set
++CONFIG_NET=y
++# CONFIG_NET_RANDOM_ETHADDR is not set
++# CONFIG_NETCONSOLE is not set
++CONFIG_NET_TFTP_VARS=y
++CONFIG_BOOTP_PXE_CLIENTARCH=0
++CONFIG_BOOTP_VCI_STRING="U-Boot"
++
++#
++# Device Drivers
++#
++
++#
++# Generic Driver Options
++#
++CONFIG_DM=y
++CONFIG_DM_WARN=y
++# CONFIG_DM_DEBUG is not set
++CONFIG_DM_DEVICE_REMOVE=y
++CONFIG_DM_STDIO=y
++CONFIG_DM_SEQ_ALIAS=y
++# CONFIG_SPL_DM_SEQ_ALIAS is not set
++CONFIG_REGMAP=y
++CONFIG_SYSCON=y
++# CONFIG_DEVRES is not set
++CONFIG_SIMPLE_BUS=y
++CONFIG_OF_TRANSLATE=y
++CONFIG_DM_DEV_READ_INLINE=y
++# CONFIG_ADC is not set
++# CONFIG_ADC_EXYNOS is not set
++# CONFIG_ADC_SANDBOX is not set
++# CONFIG_SARADC_ROCKCHIP is not set
++# CONFIG_SATA is not set
++CONFIG_LIBATA=y
++CONFIG_SCSI_AHCI=y
++
++#
++# SATA/SCSI device support
++#
++CONFIG_AHCI_PCI=y
++# CONFIG_SATA_CEVA is not set
++# CONFIG_DWC_AHCI is not set
++# CONFIG_DWC_AHSATA is not set
++# CONFIG_FSL_SATA is not set
++# CONFIG_MVSATA_IDE is not set
++# CONFIG_SATA_MV is not set
++# CONFIG_SATA_SIL is not set
++# CONFIG_SATA_SIL3114 is not set
++CONFIG_BLK=y
++CONFIG_BLOCK_CACHE=y
++# CONFIG_IDE is not set
++
++#
++# Boot count support
++#
++# CONFIG_BOOTCOUNT is not set
++
++#
++# Clock
++#
++# CONFIG_CLK is not set
++# CONFIG_CPU is not set
++
++#
++# Hardware crypto devices
++#
++# CONFIG_FSL_CAAM is not set
++# CONFIG_SYS_FSL_SEC_BE is not set
++# CONFIG_SYS_FSL_SEC_LE is not set
++
++#
++# Demo for driver model
++#
++# CONFIG_DM_DEMO is not set
++
++#
++# DFU support
++#
++
++#
++# DMA Support
++#
++# CONFIG_DMA is not set
++# CONFIG_TI_EDMA3 is not set
++
++#
++# FPGA support
++#
++# CONFIG_FPGA_ALTERA is not set
++# CONFIG_FPGA_SOCFPGA is not set
++# CONFIG_FPGA_XILINX is not set
++
++#
++# GPIO Support
++#
++CONFIG_DM_GPIO=y
++# CONFIG_ALTERA_PIO is not set
++# CONFIG_DWAPB_GPIO is not set
++# CONFIG_AT91_GPIO is not set
++# CONFIG_ATMEL_PIO4 is not set
++# CONFIG_INTEL_BROADWELL_GPIO is not set
++# CONFIG_INTEL_ICH6_GPIO is not set
++# CONFIG_IMX_RGPIO2P is not set
++# CONFIG_HSDK_CREG_GPIO is not set
++# CONFIG_LPC32XX_GPIO is not set
++# CONFIG_MSM_GPIO is not set
++# CONFIG_CMD_PCA953X is not set
++# CONFIG_ROCKCHIP_GPIO is not set
++# CONFIG_CMD_TCA642X is not set
++# CONFIG_TEGRA_GPIO is not set
++# CONFIG_TEGRA186_GPIO is not set
++# CONFIG_VYBRID_GPIO is not set
++# CONFIG_DM_74X164 is not set
++# CONFIG_DM_PCA953X is not set
++# CONFIG_MPC85XX_GPIO is not set
++
++#
++# I2C support
++#
++# CONFIG_DM_I2C is not set
++# CONFIG_DM_I2C_COMPAT is not set
++# CONFIG_SYS_I2C_DW is not set
++# CONFIG_SYS_I2C_IMX_LPI2C is not set
++# CONFIG_DM_KEYBOARD is not set
++# CONFIG_CROS_EC_KEYB is not set
++
++#
++# LED Support
++#
++# CONFIG_LED is not set
++# CONFIG_LED_STATUS is not set
++
++#
++# Mailbox Controller Support
++#
++# CONFIG_DM_MAILBOX is not set
++
++#
++# Memory Controller drivers
++#
++
++#
++# Multifunction device drivers
++#
++# CONFIG_MISC is not set
++# CONFIG_CROS_EC is not set
++# CONFIG_DS4510 is not set
++# CONFIG_FSL_SEC_MON is not set
++# CONFIG_MXC_OCOTP is not set
++# CONFIG_NUVOTON_NCT6102D is not set
++# CONFIG_PWRSEQ is not set
++# CONFIG_PCA9551_LED is not set
++# CONFIG_WINBOND_W83627 is not set
++
++#
++# MMC Host controller Support
++#
++# CONFIG_MMC is not set
++CONFIG_DM_MMC=y
++
++#
++# MTD Support
++#
++# CONFIG_MTD is not set
++# CONFIG_MTD_NOR_FLASH is not set
++# CONFIG_NAND is not set
++
++#
++# SPI Flash Support
++#
++CONFIG_DM_SPI_FLASH=y
++# CONFIG_SPI_FLASH is not set
++
++#
++# UBI support
++#
++# CONFIG_MTD_UBI is not set
++# CONFIG_BITBANGMII is not set
++# CONFIG_MV88E6352_SWITCH is not set
++# CONFIG_PHYLIB is not set
++# CONFIG_DM_ETH is not set
++# CONFIG_NETDEVICES is not set
++# CONFIG_NVME is not set
++CONFIG_PCI=y
++CONFIG_DM_PCI=y
++# CONFIG_DM_PCI_COMPAT is not set
++CONFIG_PCI_PNP=y
++# CONFIG_PCIE_ECAM_GENERIC is not set
++# CONFIG_PCI_XILINX is not set
++# CONFIG_PCIE_LAYERSCAPE is not set
++
++#
++# PHY Subsystem
++#
++# CONFIG_PHY is not set
++# CONFIG_SPL_PHY is not set
++# CONFIG_MVEBU_COMPHY_SUPPORT is not set
++
++#
++# Pin controllers
++#
++# CONFIG_PINCTRL is not set
++
++#
++# Power
++#
++
++#
++# Power Domain Support
++#
++# CONFIG_POWER_DOMAIN is not set
++# CONFIG_DM_PMIC is not set
++# CONFIG_PMIC_AS3722 is not set
++# CONFIG_POWER_MC34VR500 is not set
++# CONFIG_DM_REGULATOR is not set
++# CONFIG_DM_PWM is not set
++# CONFIG_PWM_SANDBOX is not set
++# CONFIG_RAM is not set
++
++#
++# Remote Processor drivers
++#
++
++#
++# Reset Controller Support
++#
++# CONFIG_DM_RESET is not set
++
++#
++# Real Time Clock
++#
++CONFIG_DM_RTC=y
++# CONFIG_RTC_PCF2127 is not set
++# CONFIG_RTC_DS1307 is not set
++# CONFIG_RTC_S35392A is not set
++CONFIG_SCSI=y
++CONFIG_DM_SCSI=y
++
++#
++# Serial drivers
++#
++CONFIG_BAUDRATE=115200
++CONFIG_REQUIRE_SERIAL_CONSOLE=y
++CONFIG_SERIAL_PRESENT=y
++CONFIG_SPL_SERIAL_PRESENT=y
++CONFIG_DM_SERIAL=y
++# CONFIG_SERIAL_RX_BUFFER is not set
++# CONFIG_SPL_DM_SERIAL is not set
++# CONFIG_TPL_DM_SERIAL is not set
++# CONFIG_DEBUG_UART_SKIP_INIT is not set
++# CONFIG_ALTERA_JTAG_UART is not set
++# CONFIG_ALTERA_UART is not set
++# CONFIG_ATMEL_USART is not set
++# CONFIG_FSL_LPUART is not set
++# CONFIG_MVEBU_A3700_UART is not set
++# CONFIG_NULLDEV_SERIAL is not set
++CONFIG_SYS_NS16550=y
++# CONFIG_MSM_SERIAL is not set
++# CONFIG_PXA_SERIAL is not set
++
++#
++# Sound support
++#
++# CONFIG_SOUND is not set
++
++#
++# SPI Support
++#
++CONFIG_DM_SPI=y
++# CONFIG_ALTERA_SPI is not set
++# CONFIG_CADENCE_QSPI is not set
++# CONFIG_DESIGNWARE_SPI is not set
++# CONFIG_EXYNOS_SPI is not set
++# CONFIG_FSL_DSPI is not set
++# CONFIG_ICH_SPI is not set
++# CONFIG_MVEBU_A3700_SPI is not set
++# CONFIG_ROCKCHIP_SPI is not set
++# CONFIG_TEGRA114_SPI is not set
++# CONFIG_TEGRA20_SFLASH is not set
++# CONFIG_TEGRA20_SLINK is not set
++# CONFIG_TEGRA210_QSPI is not set
++# CONFIG_XILINX_SPI is not set
++# CONFIG_SOFT_SPI is not set
++# CONFIG_FSL_ESPI is not set
++# CONFIG_FSL_QSPI is not set
++# CONFIG_ATCSPI200_SPI is not set
++# CONFIG_TI_QSPI is not set
++# CONFIG_OMAP3_SPI is not set
++
++#
++# SPMI support
++#
++# CONFIG_SPMI is not set
++
++#
++# System reset device drivers
++#
++# CONFIG_SYSRESET is not set
++# CONFIG_SYSRESET_SYSCON is not set
++# CONFIG_SYSRESET_WATCHDOG is not set
++# CONFIG_DM_THERMAL is not set
++
++#
++# Timer Support
++#
++CONFIG_TIMER=y
++# CONFIG_TIMER_EARLY is not set
++# CONFIG_ALTERA_TIMER is not set
++# CONFIG_ATMEL_PIT_TIMER is not set
++CONFIG_X86_TSC_TIMER=y
++# CONFIG_OMAP_TIMER is not set
++# CONFIG_AST_TIMER is not set
++# CONFIG_STI_TIMER is not set
++# CONFIG_ATCPIT100_TIMER is not set
++# CONFIG_ROCKCHIP_TIMER is not set
++
++#
++# TPM support
++#
++# CONFIG_USB is not set
++
++#
++# Graphics support
++#
++CONFIG_DM_VIDEO=y
++# CONFIG_BACKLIGHT_GPIO is not set
++CONFIG_VIDEO_BPP8=y
++CONFIG_VIDEO_BPP16=y
++CONFIG_VIDEO_BPP32=y
++CONFIG_VIDEO_ANSI=y
++CONFIG_CONSOLE_NORMAL=y
++# CONFIG_CONSOLE_ROTATION is not set
++# CONFIG_CONSOLE_TRUETYPE is not set
++CONFIG_SYS_WHITE_ON_BLACK=y
++# CONFIG_NO_FB_CLEAR is not set
++
++#
++# TrueType Fonts
++#
++# CONFIG_VIDCONSOLE_AS_LCD is not set
++CONFIG_VIDEO_VESA=y
++# CONFIG_FRAMEBUFFER_SET_VESA_MODE is not set
++# CONFIG_VIDEO_LCD_ANX9804 is not set
++# CONFIG_VIDEO_LCD_SSD2828 is not set
++# CONFIG_VIDEO_MVEBU is not set
++# CONFIG_DISPLAY is not set
++# CONFIG_ATMEL_HLCD is not set
++# CONFIG_VIDEO_BROADWELL_IGD is not set
++# CONFIG_VIDEO_IVYBRIDGE_IGD is not set
++# CONFIG_VIDEO_ROCKCHIP is not set
++# CONFIG_VIDEO_STM32 is not set
++# CONFIG_VIDEO_TEGRA20 is not set
++# CONFIG_VIDEO_TEGRA124 is not set
++# CONFIG_VIDEO_BRIDGE is not set
++CONFIG_CONSOLE_SCROLL_LINES=1
++# CONFIG_LCD is not set
++# CONFIG_VIDEO_SIMPLE is not set
++# CONFIG_VIDEO_DT_SIMPLEFB is not set
++
++#
++# Watchdog Timer Support
++#
++# CONFIG_BCM2835_WDT is not set
++# CONFIG_ULP_WATCHDOG is not set
++# CONFIG_WDT is not set
++# CONFIG_PHYS_TO_BUS is not set
++
++#
++# File systems
++#
++# CONFIG_FS_BTRFS is not set
++# CONFIG_FS_CBFS is not set
++# CONFIG_FS_FAT is not set
++# CONFIG_FS_JFFS2 is not set
++# CONFIG_FS_CRAMFS is not set
++# CONFIG_YAFFS2 is not set
++
++#
++# Library routines
++#
++# CONFIG_BCH is not set
++# CONFIG_CC_OPTIMIZE_LIBS_FOR_SPEED is not set
++CONFIG_HAVE_PRIVATE_LIBGCC=y
++CONFIG_USE_PRIVATE_LIBGCC=y
++CONFIG_SYS_HZ=1000
++# CONFIG_USE_TINY_PRINTF is not set
++# CONFIG_PANIC_HANG is not set
++CONFIG_REGEX=y
++# CONFIG_LIB_RAND is not set
++# CONFIG_SPL_TINY_MEMSET is not set
++# CONFIG_TPL_TINY_MEMSET is not set
++# CONFIG_BITREVERSE is not set
++# CONFIG_CMD_DHRYSTONE is not set
++
++#
++# Security support
++#
++# CONFIG_AES is not set
++# CONFIG_RSA is not set
++# CONFIG_TPM is not set
++
++#
++# Hashing Support
++#
++# CONFIG_SHA1 is not set
++# CONFIG_SHA256 is not set
++# CONFIG_SHA_HW_ACCEL is not set
++
++#
++# Compression Support
++#
++# CONFIG_LZ4 is not set
++# CONFIG_LZMA is not set
++# CONFIG_LZO is not set
++# CONFIG_SPL_LZO is not set
++# CONFIG_SPL_GZIP is not set
++# CONFIG_ERRNO_STR is not set
++CONFIG_OF_LIBFDT=y
++# CONFIG_OF_LIBFDT_OVERLAY is not set
++# CONFIG_SPL_OF_LIBFDT is not set
++# CONFIG_FDT_FIXUP_PARTITIONS is not set
++
++#
++# System tables
++#
++CONFIG_GENERATE_SMBIOS_TABLE=y
++CONFIG_SMBIOS_MANUFACTURER="emulation"
++# CONFIG_EFI is not set
++CONFIG_EFI_LOADER=y
++# CONFIG_UNIT_TEST is not set
+diff --git a/include/configs/microsoft-xbox.h b/include/configs/microsoft-xbox.h
+new file mode 100644
+index 0000000000..bfd3062c15
+--- /dev/null
++++ b/include/configs/microsoft-xbox.h
+@@ -0,0 +1,31 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
++/*
++ *
++ */
++#ifndef __CONFIG_MICROSOFT_XBOX_H__
++#define __CONFIG_MICROSOFT_XBOX_H__
++
++#define CONFIG_NR_DRAM_BANKS 1
++#define CONFIG_ENV_SIZE	0x2000	/* 8KB */
++
++#define PIT_BASE	0x40
++#define PIT_COMMAND	0x03	/* PIT mode control, latch and read back */
++
++#define CONFIG_SYS_MALLOC_LEN			0x200000
++#define CONFIG_SYS_STACK_SIZE			(32 * 1024)
++
++#define CONFIG_SYS_LOAD_ADDR			0x800000
++
++#define CONFIG_SYS_IDE_MAXBUS		2
++#define CONFIG_SYS_IDE_MAXDEVICE	4
++#define CONFIG_SYS_ATA_BASE_ADDR	0
++#define CONFIG_SYS_ATA_DATA_OFFSET	0
++#define CONFIG_SYS_ATA_REG_OFFSET	0
++#define CONFIG_SYS_ATA_ALT_OFFSET	0
++#define CONFIG_SYS_ATA_IDE0_OFFSET	0x1f0
++#define CONFIG_SYS_ATA_IDE1_OFFSET	0x170
++#define CONFIG_ATAPI
++
++#define CONFIG_SYS_SCSI_MAX_SCSI_ID 1
++
++#endif	/* __CONFIG_MICROSOFT_XBOX_H__ */
+-- 
+2.17.1
+

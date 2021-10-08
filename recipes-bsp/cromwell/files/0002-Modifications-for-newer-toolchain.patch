@@ -1,0 +1,84 @@
+From 4ada7b8641884bda1b032316c4da969ad5dc8efd Mon Sep 17 00:00:00 2001
+From: Thomas Epperson <thomas.epperson@gmail.com>
+Date: Mon, 3 Sep 2018 20:39:12 -0400
+Subject: [PATCH 2/3] Modifications for newer toolchain
+
+---
+ Makefile                 | 16 +++++++++++-----
+ boot/BootStartup.S       |  5 +++--
+ drivers/usb/sys/usbkey.c |  1 +
+ 3 files changed, 15 insertions(+), 7 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index 9ff2e44..c24705b 100644
+--- a/Makefile
++++ b/Makefile
+@@ -1,7 +1,7 @@
+ #CC	= gcc
+ # prepare check for gcc 3.3, $(GCC_3.3) will either be 0 or 1
+ GCC_3.3 := $(shell expr `$(CC) -dumpversion` \>= 3.3)
+-
++																																																																																											
+ #ETHERBOOT := yes
+ INCLUDE += -I$(TOPDIR)/grub -I$(TOPDIR)/include -I$(TOPDIR)/ -I./ -I$(TOPDIR)/fs/cdrom \
+ 	-I$(TOPDIR)/fs/fatx -I$(TOPDIR)/fs/grub -I$(TOPDIR)/lib/eeprom -I$(TOPDIR)/lib/crypt \
+@@ -14,11 +14,17 @@ INCLUDE += -I$(TOPDIR)/grub -I$(TOPDIR)/include -I$(TOPDIR)/ -I./ -I$(TOPDIR)/fs
+ CROM_CFLAGS=$(INCLUDE)
+ 
+ #You can override these if you wish.
+-CFLAGS= -O2 -g -march=pentium -Werror -fomit-frame-pointer -Wstrict-prototypes -ffreestanding
++CFLAGS= -Os -march=pentium -m32 -Werror -Wstrict-prototypes -Wreturn-type -fomit-frame-pointer  -DIPv4 -fpack-struct -ffreestanding -fno-PIC
+ 
+-# add the option for gcc 3.3 only, again, non-overridable
+-ifeq ($(GCC_3.3), 1)
+-CROM_CFLAGS += -fno-zero-initialized-in-bss
++# add the option for gcc 4.2 only, again, non-overridable
++ifeq ($(GCC_4.2), 1)
++CFLAGS += -fno-stack-protector -U_FORTIFY_SOURCE
++endif
++
++# add the option for gcc 4.2 only, again, non-overridable
++ifeq ($(GCC_6.2), 1)
++CFLAGS += -fno-PIC
++2BL_CFLAGS += -fno-PIC
+ endif
+ 
+ TOPDIR  := $(shell /bin/pwd)
+diff --git a/boot/BootStartup.S b/boot/BootStartup.S
+index 326e46b..4aac811 100644
+--- a/boot/BootStartup.S
++++ b/boot/BootStartup.S
+@@ -102,7 +102,8 @@ start_linux:
+ 	// Copy the GDT to its final location
+ 	movl $GDT_LOC, %edi
+ 	movl $tableGdt, %esi
+-	movl $(tableGdtEnd-tableGdt)/4, %ecx
++	movl $(tableGdtEnd-tableGdt), %ecx
++	shrl $2, %ecx
+ 	rep movsl
+ 
+ 	// Load the new GDT
+@@ -138,7 +139,7 @@ reload_cs:
+         
+     // We clear the IDT in RAM   (IDT located @  0xb0000 )
+ 	xor %eax, %eax
+-	movl $0x5000/4, %ecx
++	movl $0x1400, %ecx
+ 	movl $IDT_LOC, %edi
+ 	rep stosl
+ 	wbinvd
+diff --git a/drivers/usb/sys/usbkey.c b/drivers/usb/sys/usbkey.c
+index cab2d1e..6f3b5fe 100755
+--- a/drivers/usb/sys/usbkey.c
++++ b/drivers/usb/sys/usbkey.c
+@@ -79,6 +79,7 @@ static int usb_kbd_probe(struct usb_interface *intf, const struct usb_device_id
+ 	#if keyboarddebug
+ 	printe("USB Keyboard Connected\n");	
+ 	#endif
++	return 0;
+ }
+ 
+ 
+-- 
+1.9.1
+

@@ -1,5 +1,7 @@
 #!/bin/bash
 
+MACHINE=xbox
+
 echo "testing"
 
 while test -n "$1"; do

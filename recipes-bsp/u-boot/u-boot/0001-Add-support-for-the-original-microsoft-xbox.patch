@@ -1,12 +1,14 @@
-From d14de3f232c8cbacef82a9b83542400a1f130715 Mon Sep 17 00:00:00 2001
+From 26287123e3ad88ed2bc6a6ffbc82739de26b2f05 Mon Sep 17 00:00:00 2001
 From: Thomas Epperson <thomas.epperson@gmail.com>
 Date: Fri, 9 Nov 2018 18:36:29 -0500
 Subject: [PATCH] Add support for the original microsoft xbox
 
+%% original patch: 0001-Add-support-for-the-original-microsoft-xbox.patch
 ---
  arch/x86/Kconfig                           |   4 +
  arch/x86/cpu/start.S                       |   3 +
  arch/x86/cpu/u-boot.lds                    |   4 +-
+ arch/x86/dts/Makefile                      |   1 +
  arch/x86/dts/xbox.dts                      |  15 +
  board/microsoft/Kconfig                    |  18 +
  board/microsoft/xbox/2bPicResponseAction.c | 155 ++++
@@ -21,10 +23,10 @@ Subject: [PATCH] Add support for the original microsoft xbox
  board/microsoft/xbox/car.S                 |  10 +
  board/microsoft/xbox/dram.c                |  35 +
  board/microsoft/xbox/start.S               |  30 +
- board/microsoft/xbox/xbox.c                | 106 +++
+ board/microsoft/xbox/xbox.c                | 111 +++
  configs/microsoft-xbox_defconfig           | 859 +++++++++++++++++++++
- include/configs/microsoft-xbox.h           |  31 +
- 20 files changed, 1973 insertions(+), 1 deletion(-)
+ include/configs/microsoft-xbox.h           |  30 +
+ 21 files changed, 1978 insertions(+), 1 deletion(-)
  create mode 100644 arch/x86/dts/xbox.dts
  create mode 100644 board/microsoft/Kconfig
  create mode 100644 board/microsoft/xbox/2bPicResponseAction.c
@@ -44,10 +46,10 @@ Subject: [PATCH] Add support for the original microsoft xbox
  create mode 100644 include/configs/microsoft-xbox.h
 
 diff --git a/arch/x86/Kconfig b/arch/x86/Kconfig
-index 5c23b2cb57..d8c461bff8 100644
+index 17a6fe6d3d..373a3f86c7 100644
 --- a/arch/x86/Kconfig
 +++ b/arch/x86/Kconfig
-@@ -78,6 +78,9 @@ config VENDOR_GOOGLE
+@@ -77,6 +77,9 @@ config VENDOR_GOOGLE
  config VENDOR_INTEL
  	bool "Intel"
  
@@ -57,7 +59,7 @@ index 5c23b2cb57..d8c461bff8 100644
  endchoice
  
  # subarchitectures-specific options below
-@@ -105,6 +108,7 @@ source "board/efi/Kconfig"
+@@ -104,6 +107,7 @@ source "board/efi/Kconfig"
  source "board/emulation/Kconfig"
  source "board/google/Kconfig"
  source "board/intel/Kconfig"
@@ -66,10 +68,10 @@ index 5c23b2cb57..d8c461bff8 100644
  # platform-specific options below
  source "arch/x86/cpu/baytrail/Kconfig"
 diff --git a/arch/x86/cpu/start.S b/arch/x86/cpu/start.S
-index 8de55a0af1..ed5b0e101f 100644
+index 01524635e9..b95067a2ed 100644
 --- a/arch/x86/cpu/start.S
 +++ b/arch/x86/cpu/start.S
-@@ -24,6 +24,9 @@
+@@ -36,6 +36,9 @@
  .type _start, @function
  .globl _x86boot_start
  _x86boot_start:
@@ -80,10 +82,10 @@ index 8de55a0af1..ed5b0e101f 100644
  	 * This is the fail-safe 32-bit bootstrap entry point.
  	 *
 diff --git a/arch/x86/cpu/u-boot.lds b/arch/x86/cpu/u-boot.lds
-index 186718d8f9..acfb53b192 100644
+index a283c290ee..f01d9b6724 100644
 --- a/arch/x86/cpu/u-boot.lds
 +++ b/arch/x86/cpu/u-boot.lds
-@@ -118,5 +118,7 @@ SECTIONS
+@@ -121,5 +121,7 @@ SECTIONS
  		KEEP(*(.resetvec));
  	}
  #endif
@@ -92,6 +94,18 @@ index 186718d8f9..acfb53b192 100644
 +	.decoy_boot : AT (CONFIG_SYS_TEXT_BASE + 0x3fe00) { KEEP(*(.decoy_boot*)) }
 +#endif
  }
+diff --git a/arch/x86/dts/Makefile b/arch/x86/dts/Makefile
+index d4bdf62be6..1a19b4fc62 100644
+--- a/arch/x86/dts/Makefile
++++ b/arch/x86/dts/Makefile
+@@ -19,6 +19,7 @@ dtb-y += bayleybay.dtb \
+ 	qemu-x86_q35.dtb \
+ 	theadorable-x86-dfi-bt700.dtb \
+ 	slimbootloader.dtb \
++	xbox.dtb \
+ 	baytrail_som-db5800-som-6867.dtb
+ 
+ targets += $(dtb-y)
 diff --git a/arch/x86/dts/xbox.dts b/arch/x86/dts/xbox.dts
 new file mode 100644
 index 0000000000..bb94b9a138
@@ -1145,10 +1159,10 @@ index 0000000000..6a56c5749d
 +	jmp	early_board_init_ret
 diff --git a/board/microsoft/xbox/xbox.c b/board/microsoft/xbox/xbox.c
 new file mode 100644
-index 0000000000..3852449a75
+index 0000000000..4a097d4404
 --- /dev/null
 +++ b/board/microsoft/xbox/xbox.c
-@@ -0,0 +1,106 @@
+@@ -0,0 +1,111 @@
 +/*
 + * Copyright (C) 2015, Bin Meng <bmeng.cn@gmail.com>
 + *
@@ -1239,10 +1253,15 @@ index 0000000000..3852449a75
 +}
 +#endif
 +
++int do_reset(cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[])
++{
++	reset_cpu(0);
++}
++
 +void reset_cpu(ulong addr)
 +{
 +	/* cold reset */
-+	x86_full_reset();
++	//x86_full_reset();
 +}
 +
 +int arch_early_init_r(void)
@@ -1257,7 +1276,7 @@ index 0000000000..3852449a75
 +
 diff --git a/configs/microsoft-xbox_defconfig b/configs/microsoft-xbox_defconfig
 new file mode 100644
-index 0000000000..4ddaeea38a
+index 0000000000..f9ca493db9
 --- /dev/null
 +++ b/configs/microsoft-xbox_defconfig
 @@ -0,0 +1,859 @@
@@ -1921,7 +1940,7 @@ index 0000000000..4ddaeea38a
 +#
 +# Real Time Clock
 +#
-+CONFIG_DM_RTC=y
++# CONFIG_DM_RTC=y
 +# CONFIG_RTC_PCF2127 is not set
 +# CONFIG_RTC_DS1307 is not set
 +# CONFIG_RTC_S35392A is not set
@@ -2122,10 +2141,10 @@ index 0000000000..4ddaeea38a
 +# CONFIG_UNIT_TEST is not set
 diff --git a/include/configs/microsoft-xbox.h b/include/configs/microsoft-xbox.h
 new file mode 100644
-index 0000000000..bfd3062c15
+index 0000000000..d8feee1cf4
 --- /dev/null
 +++ b/include/configs/microsoft-xbox.h
-@@ -0,0 +1,31 @@
+@@ -0,0 +1,30 @@
 +/* SPDX-License-Identifier: GPL-2.0+ */
 +/*
 + *
@@ -2133,8 +2152,7 @@ index 0000000000..bfd3062c15
 +#ifndef __CONFIG_MICROSOFT_XBOX_H__
 +#define __CONFIG_MICROSOFT_XBOX_H__
 +
-+#define CONFIG_NR_DRAM_BANKS 1
-+#define CONFIG_ENV_SIZE	0x2000	/* 8KB */
++#define CONFIG_SYS_ISA_IO_BASE_ADDRESS 0
 +
 +#define PIT_BASE	0x40
 +#define PIT_COMMAND	0x03	/* PIT mode control, latch and read back */
@@ -2158,5 +2176,5 @@ index 0000000000..bfd3062c15
 +
 +#endif	/* __CONFIG_MICROSOFT_XBOX_H__ */
 -- 
-2.17.1
+2.30.2
 

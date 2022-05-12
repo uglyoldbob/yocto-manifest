@@ -1,8 +1,8 @@
 DESCRIPTION = "A custom image for the xbox."
 LICENSE = "MIT"
 
-IMAGE_FEATURES += "splash package-management ssh-server-openssh"
-IMAGE_FEATURES += "x11-base"
+#IMAGE_FEATURES += "splash package-management ssh-server-openssh"
+#IMAGE_FEATURES += "x11-base"
 # Uncomment below to include dev tools and packages
 # IMAGE_FEATURES += "tools-sdk dev-pkgs"
 
@@ -36,7 +36,6 @@ NETWORK_TOOLS_INSTALL = " \
 
 MEDIA_TOOLS_INSTALL = " \
   media-ctl \
-  raw2rgbpnm \
   v4l-utils \
   yavta \
 "
@@ -55,8 +54,6 @@ UTILITIES_INSTALL = " \
   gzip \
   less \
   nano \
-  packagegroup-cli-tools \
-  packagegroup-cli-tools-debug \
   sudo \
   tar \
   vim \
@@ -73,13 +70,6 @@ IMAGE_INSTALL += " \
   ${UTILITIES_INSTALL} \
 "
 
-IMAGE_INSTALL += " \
- florence \
- gnome-bluetooth \
- polkit-gnome \
- polkit-group-rule-network \
- polkit-group-rule-datetime \
-"
 
 IMAGE_INSTALL += "gprogs"
 

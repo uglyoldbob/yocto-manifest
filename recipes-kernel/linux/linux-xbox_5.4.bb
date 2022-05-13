@@ -31,9 +31,10 @@ SRCREV_meta ?= "6a12bea7312868626062fe8206ce3c5bcb7c9101"
 
 BB_STRICT_CHECKSUM = "0"
 
-SRC_URI = "git://git.yoctoproject.org/linux-yocto.git;name=machine;branch=${KBRANCH}; \
-    https://github.com/uglyoldbob/kernel_bsp.git;type=kmeta;branch=master;destsuffix=${KMETA}"
-#    "git://git.yoctoproject.org/yocto-kernel-cache;type=kmeta;name=meta;branch=yocto-5.4;destsuffix=${KMETA}"
+SRC_URI = "git://git.yoctoproject.org/linux-yocto.git;name=machine;branch=${KBRANCH} \
+           git://git.yoctoproject.org/yocto-kernel-cache;type=kmeta;name=meta;branch=yocto-5.4;destsuffix=${KMETA}"
+#       https://github.com/uglyoldbob/kernel_bsp.git;type=kmeta;name=meta;branch=master;destsuffix=${KMETA}"
+
 #SRC_URI_append = "file://xbox;type=kmeta;destsuffix=xbox"
 
 LIC_FILES_CHKSUM = "file://COPYING;md5=bbea815ee2795b2f4230826c0c6b8814"
@@ -43,7 +44,7 @@ DEPENDS += "${@bb.utils.contains('ARCH', 'x86', 'elfutils-native', '', d)}"
 DEPENDS += "openssl-native util-linux-native"
 
 PV = "${LINUX_VERSION}+git${SRCPV}"
-PR="1.02"
+PR="r0"
 
 KMETA = "kernel-meta"
 KCONF_BSP_AUDIT_LEVEL = "2"

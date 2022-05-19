@@ -1,0 +1,14 @@
+target remote 127.0.0.1:1234
+
+echo symbol-file /home/thomas/xbox2/build/workspace/sources/cromwell/obj/2lbimage.elf
+symbol-file /home/thomas/xbox2/build/workspace/sources/cromwell/obj/image-crom.elf
+
+
+break *0xfffc1000
+break *0xfffc110e
+break BootStartBiosLoader
+break decompress_kernel
+break BootResetAction
+break BootVgaInitializationKernelNG
+
+disp /i $pc

@@ -1,0 +1,9 @@
+target remote 127.0.0.1:1234
+
+symbol-file /home/thomas/xbox2/build/tmp/work/xbox-poky-linux/u-boot/1_2018.01-r0/u-boot-2018.01/u-boot
+
+disp /i $pc
+break *0xfffc1000
+break *0x100000
+break *0x100096
+break *0x100550

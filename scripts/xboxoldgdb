@@ -1,0 +1,8 @@
+target remote 127.0.0.1:1234
+
+symbol-file /home/thomas/xbox2/build/workspace/sources/cromwell/obj/binsym.elf
+
+disp /i $pc
+
+break BootResetAction
+break BootVgaInitializationKernelNG

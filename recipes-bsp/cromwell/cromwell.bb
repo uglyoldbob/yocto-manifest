@@ -5,6 +5,8 @@ LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://COPYING;md5=94d55d512a9ba36caa9b7df079bae19f"
 PROVIDES = "virtual/bootloader"
 
+inherit deploy
+
 FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
 
 S = "${WORKDIR}/git"
@@ -24,3 +26,9 @@ do_compile () {
 
 SRCREV="716422416e51c00634508dc9ea6d365a6b1b9a9f"
 SRC_URI = "git://github.com/XboxDev/cromwell.git;protocol=https;branch=master"
+
+do_deploy() {
+       install -m 644 ${WORKDIR}/git/image/cromwell.bin ${DEPLOYDIR}/cromwell.bin
+}
+
+addtask deploy before do_build after do_compile

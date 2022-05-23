@@ -1,0 +1,7 @@
+# short-description: Create a hybrid ISO image
+# long-description: Creates an EFI and legacy bootable hybrid ISO image
+# which can be used on optical media as well as USB media.
+
+part /boot --source iso --sourceparams="loader=grub-efi,image_name=xbox-cd" --ondisk cd --label XBOXCD
+
+bootloader  --timeout=15  --append=""

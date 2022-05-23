@@ -1,6 +1,7 @@
 DESCRIPTION = "A custom image for the xbox."
 LICENSE = "MIT"
 
+IMAGE_FEATURES += "read-only-rootfs"
 #IMAGE_FEATURES += "splash package-management ssh-server-openssh"
 #IMAGE_FEATURES += "x11-base"
 # Uncomment below to include dev tools and packages
@@ -71,9 +72,8 @@ IMAGE_INSTALL += " \
 "
 
 IMAGE_FSTYPES = "wic wic.bmap"
-WKS_FILE="xbox-hd.wks"
+WKS_FILE="xbox-cd.wks"
 
-IMAGE_INSTALL += "gprogs"
 IMAGE_INSTALL += "cromwell-boot"
 
 # Create a generic 'gumstix' user account, part of the gumstix group,

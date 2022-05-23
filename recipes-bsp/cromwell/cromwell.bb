@@ -28,7 +28,8 @@ SRCREV="716422416e51c00634508dc9ea6d365a6b1b9a9f"
 SRC_URI = "git://github.com/XboxDev/cromwell.git;protocol=https;branch=master"
 
 do_deploy() {
-       install -m 644 ${WORKDIR}/git/image/cromwell.bin ${DEPLOYDIR}/cromwell.bin
+       install -m 644 ${S}/image/cromwell.bin ${DEPLOYDIR}/cromwell.bin
+       install -m 644 ${S}/obj/image-crom.elf ${DEPLOYDIR}/cromwell.elf
 }
 
 addtask deploy before do_build after do_compile

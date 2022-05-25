@@ -74,7 +74,7 @@ IMAGE_INSTALL += " \
 IMAGE_FSTYPES = "wic wic.bmap"
 WKS_FILE="xbox-cd.wks"
 
-IMAGE_INSTALL += "cromwell-boot"
+IMAGE_INSTALL += "cromwell-boot cromwell-kernel"
 
 # Create a generic 'gumstix' user account, part of the gumstix group,
 # using '/bin/sh' and with a home directory '/home/gumstix' (see

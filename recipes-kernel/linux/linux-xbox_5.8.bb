@@ -30,4 +30,12 @@ COMPATIBLE_MACHINE = "xbox"
 # Functionality flags
 KERNEL_FEATURES = ""
 
+PACKAGES += "cromwell-kernel"
+FILES_cromwell-kernel = "/boot/kernel"
+
+do_install:append () {
+ install -m 0644 ${WORKDIR}/linux-xbox-tiny-build/arch/i386/boot/bzImage ${D}/boot/kernel
+ rm -f ${D}/boot/bzImage*
+ rm -f ${D}/boot/bzImage 
+}
 

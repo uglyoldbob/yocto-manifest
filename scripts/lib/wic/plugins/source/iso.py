@@ -114,7 +114,6 @@ class PlainIsoImagePlugin(SourcePlugin):
         iso_img = "%s/tempiso_img.iso" % cr_workdir
         iso_bootimg = "isolinux/isolinux.bin"
         iso_bootcat = "isolinux/boot.cat"
-        efi_img = "efi.img"
 
         mkisofs_cmd = "mkisofs -V %s " % part.label
         mkisofs_cmd += "-o %s -U " % iso_img
@@ -127,26 +126,24 @@ class PlainIsoImagePlugin(SourcePlugin):
         mkisofs_cmd = "mkisofs -V %s " % part.label
         mkisofs_cmd += "-o %s -U " % iso_img
         mkisofs_cmd += "-J -joliet-long -r -iso-level 2 %s" % isodir
-        logger.debug("I am groot\n")
 
-
-        exec_native_cmd("ls -la %s > test.txt" % isodir, native_sysroot)
-
-        logger.warning("running command: %s", mkisofs_cmd)
         exec_native_cmd(mkisofs_cmd, native_sysroot)
-
-        raise WicError("Just check to see if you are there. I am groot %s " % isodir)
-
-
-
-        shutil.rmtree(isodir)
 
         du_cmd = "du -Lbks %s" % iso_img
         out = exec_cmd(du_cmd)
         isoimg_size = int(out.split()[0])
 
+        full_path_iso = "%s/%s.iso" % (creator.kernel_dir, creator.name)
+
+        shutil.copy2(iso_img, full_path_iso)
+
         part.size = isoimg_size
         part.source_file = iso_img
+
+    @staticmethod
+    def _do_print(thing):
+        for attr in dir(thing):
+            logger.warning(".%s = %s" % (attr, getattr(thing, attr)))
 
     @classmethod
     def do_install_disk(cls, disk, disk_name, creator, workdir, oe_builddir,
@@ -156,20 +153,11 @@ class PlainIsoImagePlugin(SourcePlugin):
         disk image.  In this case, we insert/modify the MBR using isohybrid
         utility for booting via BIOS from disk storage devices.
         """
+        
+        iso_img = "%s" % disk.path
+        full_path_iso = "%s/%s.iso" % (creator.kernel_dir, creator.name)
 
-        iso_img = "%s.p1" % disk.path
-        full_path = creator._full_path(workdir, disk_name, "direct")
-        full_path_iso = creator._full_path(workdir, disk_name, "iso")
-
-        isohybrid_cmd = "isohybrid -u %s" % iso_img
-        logger.debug("running command: %s", isohybrid_cmd)
-        exec_native_cmd(isohybrid_cmd, native_sysroot)
-
-        # Replace the image created by direct plugin with the one created by
-        # mkisofs command. This is necessary because the iso image created by
-        # mkisofs has a very specific MBR is system area of the ISO image, and
-        # direct plugin adds and configures an another MBR.
-        logger.debug("Replaceing the image created by direct plugin\n")
-        os.remove(disk.path)
         shutil.copy2(iso_img, full_path_iso)
-        shutil.copy2(full_path_iso, full_path)
+
+
+

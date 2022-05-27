@@ -112,16 +112,6 @@ class PlainIsoImagePlugin(SourcePlugin):
 
         #create ISO image
         iso_img = "%s/tempiso_img.iso" % cr_workdir
-        iso_bootimg = "isolinux/isolinux.bin"
-        iso_bootcat = "isolinux/boot.cat"
-
-        mkisofs_cmd = "mkisofs -V %s " % part.label
-        mkisofs_cmd += "-o %s -U " % iso_img
-        mkisofs_cmd += "-J -joliet-long -r -iso-level 2 -b %s " % iso_bootimg
-        mkisofs_cmd += "-c %s -no-emul-boot -boot-load-size 4 " % iso_bootcat
-        mkisofs_cmd += "-boot-info-table -eltorito-alt-boot "
-        mkisofs_cmd += "-eltorito-platform 0xEF -eltorito-boot %s " % efi_img
-        mkisofs_cmd += "-no-emul-boot %s " % isodir
 
         mkisofs_cmd = "mkisofs -V %s " % part.label
         mkisofs_cmd += "-o %s -U " % iso_img
@@ -154,7 +144,7 @@ class PlainIsoImagePlugin(SourcePlugin):
         utility for booting via BIOS from disk storage devices.
         """
         
-        iso_img = "%s" % disk.path
+        iso_img = "%s.p1" % disk.path
         full_path_iso = "%s/%s.iso" % (creator.kernel_dir, creator.name)
 
         shutil.copy2(iso_img, full_path_iso)

@@ -14,7 +14,6 @@ inherit core-image
 SYSTEM_TOOLS_INSTALL = " \
   alsa-utils \
   cpufrequtils \
-  systemd-analyze \
   tzdata \
 "
 
@@ -26,12 +25,10 @@ DEV_TOOLS_INSTALL = " \
 
 NETWORK_TOOLS_INSTALL = " \
   curl \
-  dnsmasq \
   hostapd \
   iproute2 \
   iputils \
   iw \
-  ntp \
   uim \
 "
 

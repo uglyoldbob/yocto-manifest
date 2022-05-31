@@ -3,7 +3,7 @@ require recipes-kernel/linux/linux-yocto.inc
 COMPATIBLE_MACHINE = "overo"
 
 # Pull in the devicetree files into the rootfs
-RDEPENDS_kernel-base += "kernel-devicetree"
+RDEPENDS:kernel-base += "kernel-devicetree"
 
 KERNEL_DEVICETREE_overo = "omap3-overo-chestnut43.dtb"
 
@@ -16,11 +16,11 @@ LINUX_VERSION_EXTENSION = "-custom"
 
 BOOT_SPLASH = "TinyScreenBootup224.ppm"
 
-FILESEXTRAPATHS_prepend := "${THISDIR}/linux-gumstix-4.13:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/linux-gumstix-4.13:"
 
 S = "${WORKDIR}/git"
 
-do_compile_prepend() {
+do_compile:prepend() {
   cp -fv ${WORKDIR}/${BOOT_SPLASH} ${WORKDIR}/git/drivers/video/logo/logo_linux_clut224.ppm
 }
 

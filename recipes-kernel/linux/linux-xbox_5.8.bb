@@ -15,8 +15,8 @@ KMETA = "kernel-meta"
 KCONF_BSP_AUDIT_LEVEL = "2"
 KCONF_AUDIT_LEVEL = "2"
 
-SRCREV_machine ?= "cc89bd62acde4130b24854711db18c6513678484"
-SRCREV_meta ?= "AUTOINC"
+SRCREV:machine ?= "cc89bd62acde4130b24854711db18c6513678484"
+SRCREV:meta ?= "AUTOINC"
 
 PV = "${LINUX_VERSION}+git${SRCPV}"
 
@@ -31,7 +31,7 @@ COMPATIBLE_MACHINE = "xbox"
 KERNEL_FEATURES = ""
 
 PACKAGES += "cromwell-kernel"
-FILES_cromwell-kernel = "/boot/kernel"
+FILES:cromwell-kernel = "/boot/kernel"
 
 do_install:append () {
  install -m 0644 ${WORKDIR}/linux-xbox-tiny-build/arch/i386/boot/bzImage ${D}/boot/kernel

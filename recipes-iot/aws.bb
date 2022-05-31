@@ -4,13 +4,13 @@ LICENSE = "Apache-2.0"
 
 LIC_FILES_CHKSUM = "file://LICENSE.txt;md5=acc7a1bf87c055789657b148939e4b40"
 
-FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-${PV}:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}-${PV}:"
 SRC_URI = " \
 	git://github.com/aws/aws-iot-device-sdk-embedded-C.git;rev=release;branch=release;destsuffix=git/aws \
 	git://github.com/ARMmbed/mbedtls.git;rev=mbedtls-2.7;branch=mbedtls-2.7;destsuffix=git/aws/external_libs/mbedTLS \
 	"
 
-do_compile_prepend() {
+do_compile:prepend() {
   echo "clean:" >> ${S}/external_libs/CppUTest/Makefile
   cp ${S}/samples/linux/subscribe_publish_library_sample/Makefile ${S}
   sed -i -e 's/..\/..\/../.\//' ${S}/Makefile
@@ -25,7 +25,7 @@ S = "${WORKDIR}/git/aws"
 
 #BUILD_CFLAGS += " -g -O0"
 
-do_install_append() {
+do_install:append() {
 	install -d ${D}${libdir}
 	install -d ${D}${includedir}
 	install -d ${D}${includedir}/aws
@@ -44,7 +44,7 @@ do_install_append() {
 
 PROVIDES += "${PN}-dev ${PN}-staticdev"
 
-FILES_${PN}-staticdev = "${libdir}/*.a"
-FILES_${PN}-dev = "${prefix}/include/aws/*.h"
+FILES:${PN}-staticdev = "${libdir}/*.a"
+FILES:${PN}-dev = "${prefix}/include/aws/*.h"
 
 inherit pkgconfig

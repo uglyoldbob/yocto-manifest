@@ -9,7 +9,7 @@ DEPENDS = " \
  libcanberra \
  python3-pygobject \
  python3-pycairo"
-RDEPENDS_${PN} = " \
+RDEPENDS:${PN} = " \
  ncurses \
  gsettings-desktop-schemas \
  iso-codes \
@@ -31,16 +31,16 @@ RDEPENDS_${PN} = " \
 LICENSE = "GPL-3+"
 
 LIC_FILES_CHKSUM = "file://COPYING;md5=df525ece2aec4bd4e3854d0a7cd08aa9"
-FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-${PV}:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}-${PV}:"
 
 inherit distutils3
 
-FILES_${PN} = "/usr /etc"
+FILES:${PN} = "/usr /etc"
 
 DISTUTILS_INSTALL_ARGS = "--prefix=${D}/${prefix} \
     --install-data=${D}/${datadir}"
 
-do_install_append () {
+do_install:append () {
   install -d ${D}${sysconfdir}/xdg/autostart
   cp -frv ${S}/build/share/applications/onboard.desktop ${D}${sysconfdir}/xdg/autostart/
   install -d ${D}/usr/share/glib-2.0/schemas/

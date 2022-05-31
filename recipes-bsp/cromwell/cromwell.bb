@@ -7,7 +7,7 @@ PROVIDES = "virtual/bootloader"
 
 inherit deploy
 
-FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
 S = "${WORKDIR}/git"
 COMPATIBLE_MACHINE = "xbox"

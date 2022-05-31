@@ -21,7 +21,7 @@ BBCLASSEXTEND = "native"
 SRCREV = "67fac45d54856e3817def4ef49807cf921132158"
 SRC_URI = "git://github.com/martinh/libconfuse.git"
 
-do_configure_prepend() {
+do_configure:prepend() {
   touch ${S}/support/config.rpath
 }
 

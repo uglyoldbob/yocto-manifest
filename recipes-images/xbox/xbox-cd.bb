@@ -79,7 +79,7 @@ IMAGE_INSTALL += "cromwell-boot cromwell-kernel"
 # to the 'sudo' group.
 inherit extrausers
 EXTRA_USERS_PARAMS = " \
-    useradd -P xbox -G sudo xbox; \
+    useradd -p '$5$NtusLse5Nrwdg9Ht$g5RSdczawQXABdkHKludnjT3rihSmsTM71atTgwyqD1' -G sudo xbox; \
 "
 
 

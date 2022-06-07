@@ -12,7 +12,7 @@ SRC_URI = "file://linuxboot.cfg"
 S = "${WORKDIR}"
 COMPATIBLE_MACHINE = "xbox"
 
-PR = "r0"
+PR = "r2"
 
 do_configure () {
 }

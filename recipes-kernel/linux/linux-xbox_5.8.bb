@@ -21,7 +21,8 @@ SRCREV_meta ?= "AUTOINC"
 PV = "${LINUX_VERSION}+git${SRCPV}"
 
 SRC_URI = "git://github.com/xboxdev/xbox-linux.git;protocol=https;branch=xbox-linux;name=machine \
- git://github.com/uglyoldbob/kernel_bsp.git;protocol=https;branch=main;type=kmeta;name=meta;destsuffix=${KMETA}"
+ file://defconfig"
+# git://github.com/uglyoldbob/kernel_bsp.git;protocol=https;branch=main;type=kmeta;name=meta;destsuffix=${KMETA}"
 #
 #           git://git.yoctoproject.org/yocto-kernel-cache;type=kmeta;name=meta;branch=yocto-5.8;destsuffix=${KMETA}"
 

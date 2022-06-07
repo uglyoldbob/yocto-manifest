@@ -14,7 +14,6 @@ inherit core-image
 SYSTEM_TOOLS_INSTALL = " \
   alsa-utils \
   cpufrequtils \
-  systemd-analyze \
   tzdata \
 "
 
@@ -26,12 +25,10 @@ DEV_TOOLS_INSTALL = " \
 
 NETWORK_TOOLS_INSTALL = " \
   curl \
-  dnsmasq \
   hostapd \
   iproute2 \
   iputils \
   iw \
-  ntp \
   uim \
 "
 
@@ -82,7 +79,7 @@ IMAGE_INSTALL += "cromwell-boot cromwell-kernel"
 # to the 'sudo' group.
 inherit extrausers
 EXTRA_USERS_PARAMS = " \
-    useradd -P xbox -G sudo xbox; \
+    useradd -p '$5$NtusLse5Nrwdg9Ht$g5RSdczawQXABdkHKludnjT3rihSmsTM71atTgwyqD1' -G sudo xbox; \
 "
 
 

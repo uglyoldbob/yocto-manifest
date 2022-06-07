@@ -13,7 +13,7 @@ SRC_URI = "git://github.com/cpputest/cpputest.git"
 
 S = "${WORKDIR}/git"
 
-do_install_append() {
+do_install:append() {
 	install -d ${D}${libdir}
 	install -m 0644 lib/libCppUTest.a ${D}${libdir}
 	install -m 0644 lib/libCppUTestExt.a ${D}${libdir}

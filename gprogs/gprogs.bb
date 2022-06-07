@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=96af5705d6f64a88e035781ef00e98a8"
 
 inherit autotools pkgconfig update-alternatives
 
-FILESEXTRAPATHS_prepend := "${THISDIR}/${PN}-${PV}:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}-${PV}:"
 SRCREV = "master"
 SRC_URI = "git://github.com/uglyoldbob/gumstix_progs.git"
 
@@ -15,16 +15,16 @@ REQUIRED_DISTRO_FEATURES += "x11"
 
 S = "${WORKDIR}/git"
 
-ALTERNATIVE_${PN}-startup = "x-session-manager"
+ALTERNATIVE:${PN}-startup = "x-session-manager"
 ALTERNATIVE_TARGET[x-session-manager] = "${bindir}/run-gprogs.sh"
 ALTERNATIVE_PRIORITY = "60"
 
 PROVIDES += "${PN}-startup"
 PACKAGES += "${PN}-startup"
 
-ALLOW_EMPTY_${PN}-startup = "1"
-FILES_${PN}-startup = "${bindir}/run-gprogs.sh "
+ALLOW_EMPTY:${PN}-startup = "1"
+FILES:${PN}-startup = "${bindir}/run-gprogs.sh "
 
-FILES_${PN} = "${bindir}/gprogs \
+FILES:${PN} = "${bindir}/gprogs \
  ${sysconfdir}/gprogs/main.ui"
 

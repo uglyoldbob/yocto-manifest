@@ -12,48 +12,32 @@ inherit core-image
 
 SYSTEM_TOOLS_INSTALL = " \
   alsa-utils \
-  cpufrequtils \
-  systemd-analyze \
   tzdata \
 "
 
 DEV_TOOLS_INSTALL = " \
-  memtester \
   mtd-utils-ubifs \
   u-boot-mkimage \
 "
 
 NETWORK_TOOLS_INSTALL = " \
   curl \
-  dnsmasq \
-  hostapd \
   iproute2 \
   iputils \
   iw \
-  ntp \
-  uim \
-"
-
-MEDIA_TOOLS_INSTALL = " \
-  media-ctl \
-  v4l-utils \
-  yavta \
 "
 
 GRAPHICS_LIBS = " \
   mtdev \ 
-  tslib \
 "  
 
 UTILITIES_INSTALL = " \
   coreutils \
   diffutils \
   findutils \
-  gpsd \
   grep \
   gzip \
   less \
-  nano \
   sudo \
   tar \
   vim \
@@ -65,7 +49,6 @@ IMAGE_INSTALL += " \
   ${SYSTEM_TOOLS_INSTALL} \
   ${DEV_TOOLS_INSTALL} \
   ${NETWORK_TOOLS_INSTALL} \
-  ${MEDIA_TOOLS_INSTALL} \
   ${GRAPHICS_LIBS} \
   ${UTILITIES_INSTALL} \
 "
@@ -73,8 +56,8 @@ IMAGE_INSTALL += " \
 IMAGE_FSTYPES = "wic wic.bmap"
 WKS_FILE="xbox-hd.wks"
 
-IMAGE_INSTALL += "gprogs"
-IMAGE_INSTALL += "cromwell-boot"
+#IMAGE_INSTALL += "gprogs"
+#IMAGE_INSTALL += "cromwell-boot"
 
 # Create a generic 'gumstix' user account, part of the gumstix group,
 # using '/bin/sh' and with a home directory '/home/gumstix' (see
@@ -82,7 +65,7 @@ IMAGE_INSTALL += "cromwell-boot"
 # to the 'sudo' group.
 inherit extrausers
 EXTRA_USERS_PARAMS = " \
-    useradd -P xbox -G sudo xbox; \
+    useradd -p '$5$SbHarFQFMohIwIjP$4KaSsQDCraqEGzJewZk.2BYBzpVhxdx4EX/omngxF35' -G sudo xbox; \
 "
 
 

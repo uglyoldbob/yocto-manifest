@@ -9,7 +9,7 @@ inherit cmake
 inherit autotools
 inherit native
 
-SRC_URI = "git://github.com/cpputest/cpputest.git"
+SRC_URI = "git://github.com/cpputest/cpputest.git;protocol=https"
 
 S = "${WORKDIR}/git"
 

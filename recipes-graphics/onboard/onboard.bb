@@ -33,7 +33,7 @@ LICENSE = "GPL-3+"
 LIC_FILES_CHKSUM = "file://COPYING;md5=df525ece2aec4bd4e3854d0a7cd08aa9"
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}-${PV}:"
 
-inherit distutils3
+inherit setuptools3
 
 FILES:${PN} = "/usr /etc"
 

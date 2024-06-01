@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+  <remote name="yocto" fetch="https://git.yoctoproject.org" />
+  <remote name="oe" fetch="https://github.com/openembedded" />
+  <remote fetch="https://github.com/uglyoldbob" name="uglyoldbob"/>
+  
+  <project name="oe-custom" path="sources/meta-uglyoldbob" remote="uglyoldbob" revision="refs/heads/master"/>
+  <project name="poky" revision="refs/heads/dunfell" remote="yocto" path="sources/poky" />
+  <project name="meta-openembedded" revision="refs/heads/dunfell"  remote="oe" path="sources/meta-openembedded" />
+
+</manifest>

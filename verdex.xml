@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+  <default remote="gumstix" revision="default"/>
+
+  <!-- You can have as many remote repositories as you like -->
+  <remote name="gumstix" fetch="git://github.com/gumstix" />
+  <remote name="yocto" fetch="git://git.yoctoproject.org" />
+  <remote name="oe" fetch="git://git.openembedded.org" />
+  <remote name="bmwcarit" fetch="git://github.com/bmwcarit" />
+  <remote fetch="git://github.com/uglyoldbob" name="uglyoldbob"/>
+  <remote name="qt5" fetch="git://github.com/meta-qt5" />
+  <remote name="OSS" fetch="git://github.com/OSSystems" />
+  <remote name="freescale" fetch="git://github.com/Freescale" />
+  <remote name="fsl-release" fetch="git://git.freescale.com/imx" />
+  <!-- List all the repositories you want to fetch -->
+  <!-- "name": git repository's name on hosting server
+       "remote": the remote host from above (if not the default)
+       "revision": commitish to checkout (if not the default)
+       "path": directory where git repository gets cloned/synced -->
+  
+  <project name="oe-custom" path="poky/meta-uglyoldbob" remote="uglyoldbob" revision="refs/heads/verdex"/>
+  <project name="meta-browser" remote="OSS" revision="393d2aa15da21ffa532c3cd77d8cb91de997cd31" path="poky/meta-browser"/>
+  <project name="poky" revision="refs/heads/krogoth" remote="yocto" />
+  <project name="meta-openembedded" revision="refs/heads/krogoth"  remote="oe" path="poky/meta-openembedded" />
+  <project name="meta-gumstix" revision="refs/heads/krogoth"  remote="gumstix" path="poky/meta-gumstix" />
+  <project name="meta-gumstix-extras" revision="refs/heads/krogoth" remote="gumstix" path="poky/meta-gumstix-extras" />
+  <project name="meta-ti" revision="refs/heads/krogoth"  remote="yocto" path="poky/meta-ti" />
+  <project name="meta-ros" revision="eb4f9edf2af38a854a2a8d28e45ea02f6bdb7f12"  remote="bmwcarit" path="poky/meta-ros" />
+  <project name="meta-java" revision="33ddb28a6428b02ddcc82d1954ecf27cd426fbb5"  remote="yocto" path="poky/meta-java" />
+  <project name="meta-qt5" revision="refs/heads/krogoth"  remote="qt5" path="poky/meta-qt5" />
+  <project name="meta-qt4" revision="refs/heads/krogoth"  remote="yocto" path="poky/meta-qt4" />
+  <project name="meta-freescale-3rdparty" revision="refs/heads/krogoth" remote="freescale" path="poky/meta-fsl-arm-extra" />
+  <project name="meta-fsl-demos" revision="refs/heads/krogoth" remote="freescale" path="poky/meta-fsl-demos"/>
+  <project name="meta-fsl-arm" revision="refs/heads/krogoth" remote="yocto" path="poky/meta-fsl-arm"/>
+  <project name="meta-fsl-bsp-release" revision="refs/heads/krogoth_4.1.15-2.0.1" remote="fsl-release" path="poky/meta-fsl-bsp-release"/>
+  <project name="meta-nxp-imx-scm" revision="imx-4.1.15-2.0.0_ga" remote="fsl-release"  path="poky/meta-nxp-imx-scm"/>
+
+</manifest>
+

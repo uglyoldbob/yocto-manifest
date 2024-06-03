@@ -51,7 +51,7 @@ IMAGE_INSTALL += " \
   ${NETWORK_TOOLS_INSTALL} \
   ${GRAPHICS_LIBS} \
   ${UTILITIES_INSTALL} \
-  syslinux-pxeboot \
+  syslinux-pxelinux \
 "
 
 IMAGE_FSTYPES = "wic wic.bmap"

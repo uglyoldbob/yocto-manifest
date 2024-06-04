@@ -10,47 +10,7 @@ IMAGE_LINGUAS = "en-us"
 
 inherit core-image
 
-SYSTEM_TOOLS_INSTALL = " \
-  alsa-utils \
-  tzdata \
-"
-
-DEV_TOOLS_INSTALL = " \
-  mtd-utils-ubifs \
-  u-boot-mkimage \
-"
-
-NETWORK_TOOLS_INSTALL = " \
-  curl \
-  iproute2 \
-  iputils \
-  iw \
-"
-
-GRAPHICS_LIBS = " \
-  mtdev \ 
-"  
-
-UTILITIES_INSTALL = " \
-  coreutils \
-  diffutils \
-  findutils \
-  grep \
-  gzip \
-  less \
-  sudo \
-  tar \
-  vim \
-  wget \
-  zip \
-"
- 
 IMAGE_INSTALL += " \
-  ${SYSTEM_TOOLS_INSTALL} \
-  ${DEV_TOOLS_INSTALL} \
-  ${NETWORK_TOOLS_INSTALL} \
-  ${GRAPHICS_LIBS} \
-  ${UTILITIES_INSTALL} \
   syslinux-pxelinux \
 "
 

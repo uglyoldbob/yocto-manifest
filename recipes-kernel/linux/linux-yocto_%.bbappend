@@ -1,0 +1,2 @@
+COMPATIBLE_MACHINE:epia5000 = "epia5000"
+

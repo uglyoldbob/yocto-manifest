@@ -1,0 +1,5 @@
+define KMACHINE epia5000
+define KTYPE tiny
+define KARCH i586
+
+include ktypes/tiny

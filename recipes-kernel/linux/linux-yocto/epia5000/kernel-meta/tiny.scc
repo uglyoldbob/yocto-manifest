@@ -3,3 +3,5 @@ define KTYPE tiny
 define KARCH i586
 
 include ktypes/tiny
+
+kconf hardware tiny.cfg

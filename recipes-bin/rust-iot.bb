@@ -9,7 +9,7 @@ inherit cargo-update-recipe-crates cargo pkgconfig
 #pull in generated crate info
 require ${BPN}-crates.inc
 
-DEPENDS = "openssl"
+DEPENDS = "openssl bindgen-cli"
 
 S = "${WORKDIR}/git"
 

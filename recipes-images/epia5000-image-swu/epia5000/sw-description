@@ -1,0 +1,22 @@
+software =
+{
+	version = "@SWU_AUTO_VERSION";
+
+	epia5000 = {
+		hardware-compatibility: [ "1.0" ];
+
+		files: (
+			{
+				filename = "epia5000-image-epia5000.tar.gz.enc";
+				type = "archive";
+				compressed = "zlib";
+				encrypted = true;
+				device = "/dev/update";
+				filesystem = "ext4";
+				preserve-attributes = true;
+				path = "/";
+				sha256 = "$swupdate_get_sha256(epia5000-image-epia5000.tar.gz.enc)";
+			}
+		);
+	};
+}

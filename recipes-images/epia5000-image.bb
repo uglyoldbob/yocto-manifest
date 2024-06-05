@@ -8,14 +8,22 @@ LICENSE = "MIT"
 
 IMAGE_LINGUAS = "en-us"
 
-inherit core-image
+DEPENDS += "openssl-native coreutils-native"
+
+inherit core-image swupdate-enc
+
+FILESEXTRAPATHS:prepend := "${TOPDIR}:"
+
+SRC_URI += "file://conf/keys.conf \
+"
 
 IMAGE_INSTALL += " \
 	kernel-base \
 	swupdate \
+	swupdate-www \
 "
 
-IMAGE_FSTYPES = "tar.gz"
+IMAGE_FSTYPES = "tar.gz.enc"
 
 # Create a user account with a password
 # this command generates a hash for the useradd command

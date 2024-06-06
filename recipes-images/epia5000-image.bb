@@ -8,9 +8,7 @@ LICENSE = "MIT"
 
 IMAGE_LINGUAS = "en-us"
 
-DEPENDS += "openssl-native coreutils-native"
-
-inherit core-image swupdate-enc
+inherit core-image swupdate-enc 
 
 FILESEXTRAPATHS:prepend := "${TOPDIR}:"
 
@@ -23,7 +21,7 @@ IMAGE_INSTALL += " \
 	swupdate-www \
 "
 
-IMAGE_FSTYPES = "tar.gz.enc"
+IMAGE_FSTYPES = "tar.gz tar.gz.enc"
 
 # Create a user account with a password
 # this command generates a hash for the useradd command

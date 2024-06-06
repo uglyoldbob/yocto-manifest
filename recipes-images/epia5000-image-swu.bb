@@ -6,8 +6,6 @@ SRC_URI = " \
 	file://sw-description \
 "
 
-inherit swupdate
-
 SWUPDATE_SIGNING = "RSA"
 SWUPDATE_IMAGES_ENCRYPTED = "True"
 SWUPDATE_ENCRYPT_SWDESC = "True"
@@ -21,11 +19,15 @@ IMAGE_DEPENDS = "epia5000-image"
 
 # SWUPDATE_IMAGES: list of images that will be part of the compound image
 # the list can have any binaries - images must be in the DEPLOY directory
-SWUPDATE_IMAGES = " \
-	epia5000-image \
+SWUPDATE_IMAGES:epia5000 = " \
+	epia5000-image-epia5000 \
 "
 
 # Images can have multiple formats - define which image must be
 # taken to be put in the compound image
-SWUPDATE_IMAGES_FSTYPES[epia5000-image] = ".tar.gz.enc"
+SWUPDATE_IMAGES_FSTYPES[epia5000-image-epia5000] = ".rootfs.tar.gz.enc"
+
+inherit swupdate
+
+
 

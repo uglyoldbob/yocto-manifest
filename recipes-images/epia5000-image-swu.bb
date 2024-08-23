@@ -1,6 +1,8 @@
 DESCRIPTION = "Image for installing an epia5000 image"
 SECTION = ""
 
+COMPATIBLE_MACHINE = "epia5000"
+
 # Note: sw-description is mandatory
 SRC_URI = " \
 	file://sw-description \

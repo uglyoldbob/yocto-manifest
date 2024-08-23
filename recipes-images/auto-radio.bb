@@ -1,7 +1,5 @@
-DESCRIPTION = "A custom image for an installation environment that boots with pxe."
+DESCRIPTION = "A custom image for an automotive head unit."
 LICENSE = "MIT"
-
-COMPATIBLE_MACHINE = "epia5000"
 
 #IMAGE_FEATURES += "splash package-management ssh-server-openssh"
 #IMAGE_FEATURES += "x11-base"
@@ -10,7 +8,11 @@ COMPATIBLE_MACHINE = "epia5000"
 
 IMAGE_LINGUAS = "en-us"
 
+IMAGE_FSTYPES = "wic wic.gz wic.zst"
+
 inherit core-image swupdate-enc 
+
+WKS_FILE = "auto-radio.wks"
 
 FILESEXTRAPATHS:prepend := "${TOPDIR}:"
 
@@ -22,8 +24,6 @@ IMAGE_INSTALL += " \
 	swupdate \
 	swupdate-www \
 "
-
-IMAGE_FSTYPES = "tar.gz tar.gz.enc"
 
 # Create a user account with a password
 # this command generates a hash for the useradd command

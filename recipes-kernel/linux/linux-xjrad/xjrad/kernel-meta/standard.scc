@@ -3,4 +3,4 @@ define KTYPE standard
 
 include ktypes/standard
 
-kconf hardware standard.cfg
+kconf hardware xjrad.cfg

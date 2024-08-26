@@ -19,6 +19,17 @@ FILESEXTRAPATHS:prepend := "${TOPDIR}:"
 SRC_URI += "file://conf/keys.conf \
 "
 
+IMAGE_FEATURES += "${@bb.utils.contains('DISTRO_FEATURES', 'wayland', 'weston', \
+       bb.utils.contains('DISTRO_FEATURES',     'x11', 'x11-base x11-sato', \
+                                                       '', d), d)} \
+"
+
+IMAGE_INSTALL += " \
+       	${@bb.utils.contains('DISTRO_FEATURES', 'x11', 'xterm', '', d)} \
+	${@bb.utils.contains('DISTRO_FEATURES', 'wayland', 'weston-init', '', d)} \
+	${@bb.utils.contains('DISTRO_FEATURES', 'wayland', 'wayland', '', d)} \
+"
+
 IMAGE_INSTALL += " \
 	kernel-base \
 	swupdate \

@@ -8,16 +8,15 @@ LICENSE = "MIT"
 
 IMAGE_LINGUAS = "en-us"
 
-IMAGE_FSTYPES = "wic wic.gz wic.zst"
+IMAGE_FSTYPES = "tar.gz tar.gz.enc wic wic.gz wic.zst"
 
-inherit core-image swupdate-enc 
+inherit core-image swupdate-enc
 
 WKS_FILE = "auto-radio.wks"
 
 FILESEXTRAPATHS:prepend := "${TOPDIR}:"
 
-SRC_URI += "file://conf/keys.conf \
-"
+SRC_URI += "file://conf/keys.conf"
 
 IMAGE_FEATURES += "${@bb.utils.contains('DISTRO_FEATURES', 'wayland', 'weston', \
        bb.utils.contains('DISTRO_FEATURES',     'x11', 'x11-base x11-sato', \
@@ -27,6 +26,7 @@ IMAGE_FEATURES += "${@bb.utils.contains('DISTRO_FEATURES', 'wayland', 'weston', 
 IMAGE_INSTALL += " \
        	${@bb.utils.contains('DISTRO_FEATURES', 'x11', 'xterm', '', d)} \
 	${@bb.utils.contains('DISTRO_FEATURES', 'wayland', 'weston-init', '', d)} \
+	${@bb.utils.contains('DISTRO_FEATURES', 'x11 wayland', 'xwayland', '', d)} \
 	${@bb.utils.contains('DISTRO_FEATURES', 'wayland', 'wayland', '', d)} \
 "
 
@@ -34,6 +34,9 @@ IMAGE_INSTALL += " \
 	kernel-base \
 	swupdate \
 	swupdate-www \
+	openssh \
+	xrandr \
+	libgpiod libgpiod-tools libgpiod-dev \
 "
 
 # Create a user account with a password

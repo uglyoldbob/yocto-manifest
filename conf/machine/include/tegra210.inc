@@ -9,7 +9,7 @@ KERNEL_IMAGETYPE = "Image"
 
 TEGRA_ESSENTIAL_EXTRA_RDEPENDS = "kernel-image"
 
-INITRAMFS_IMAGE ?= "tegra-minimal-initramfs"
+INITRAMFS_IMAGE ?= ""
 TEGRA_INITRAMFS_INITRD ?= "1"
 
 TEGRA_AUDIO_DEVICE ?= "tegrahda"

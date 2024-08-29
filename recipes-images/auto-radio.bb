@@ -35,8 +35,8 @@ IMAGE_INSTALL += " \
 	swupdate \
 	swupdate-www \
 	openssh \
-	xrandr \
 	libgpiod libgpiod-tools libgpiod-dev \
+	v4l-utils \
 "
 
 # Create a user account with a password

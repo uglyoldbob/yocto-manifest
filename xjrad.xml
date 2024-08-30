@@ -3,7 +3,6 @@
   <remote name="yocto" fetch="https://git.yoctoproject.org" />
   <remote name="oe" fetch="https://github.com/openembedded" />
   <remote fetch="https://github.com/uglyoldbob" name="uglyoldbob"/>
-  <remote fetch="https://github.com/OE4T" name="oe4t"/>
   <remote fetch="https://github.com/sbabic"        name="sbabic"/>
   <remote fetch="https://github.com/kraj"          name="clang"/>
   
@@ -12,6 +11,4 @@
   <project name="meta-openembedded" revision="refs/heads/scarthgap"  remote="oe" path="sources/meta-openembedded" />
   <project name="meta-swupdate" revision="refs/heads/patch-1" remote="uglyoldbob" path="sources/meta-swupdate" />
   <project name="meta-clang" revision="refs/heads/scarthgap" remote="clang" path="sources/meta-clang" />
-  <project name="meta-tegra" revision="refs/heads/scarthgap" remote="oe4t" path="sources/meta-tegra" />
-
 </manifest>

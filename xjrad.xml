@@ -7,8 +7,8 @@
   <remote fetch="https://github.com/kraj"          name="clang"/>
   
   <project name="oe-custom" revision="refs/heads/master" remote="uglyoldbob" path="sources/meta-uglyoldbob"/>
-  <project name="poky" revision="refs/heads/scarthgap" remote="yocto" path="sources/poky" />
-  <project name="meta-openembedded" revision="refs/heads/scarthgap"  remote="oe" path="sources/meta-openembedded" />
+  <project name="poky" revision="refs/heads/master" remote="yocto" path="sources/poky" />
+  <project name="meta-openembedded" revision="refs/heads/master"  remote="oe" path="sources/meta-openembedded" />
   <project name="meta-swupdate" revision="refs/heads/patch-1" remote="uglyoldbob" path="sources/meta-swupdate" />
   <project name="meta-clang" revision="refs/heads/scarthgap" remote="clang" path="sources/meta-clang" />
 </manifest>

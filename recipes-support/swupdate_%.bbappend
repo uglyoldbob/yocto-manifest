@@ -9,6 +9,8 @@ SRC_URI += "file://tempdefconfig \
 	file://swupdate.cfg \
 "
 
+S = "${WORKDIR}/git"
+
 DEPENDS += " libarchive curl"
 
 inherit swupdate-lib

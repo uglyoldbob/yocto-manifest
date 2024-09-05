@@ -36,8 +36,22 @@ IMAGE_INSTALL += " \
 	swupdate-www \
 	openssh \
 	libgpiod libgpiod-tools libgpiod-dev \
-	v4l-utils \
+	radio-gui \
+	alsa-utils \
+	espeak \
+	nano \
+	pulseaudio-misc \
+	pulseaudio-module-alsa-sink \
+	pulseaudio-module-always-sink \
+	pulseaudio-module-bluez5-discover \
+	pulseaudio-module-echo-cancel \
+	pulseaudio-module-virtual-sink \
+	pulseaudio-server \
+	pulseaudio-lib-alsa-util \
+	bluealsa \
 "
+
+#alsaloop -C bluealsa:DEV=(address),PROFILE=a2dp -P plughw:0,3 -r 32000 -c 2 -f S16_LE --sync=simple -t 50000 -T 1
 
 # Create a user account with a password
 # this command generates a hash for the useradd command

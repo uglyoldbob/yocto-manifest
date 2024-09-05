@@ -2,6 +2,7 @@ From eaea8d56f12c1ae9dd2e50b4000629b907ea16f0 Mon Sep 17 00:00:00 2001
 From: Thomas Epperson <thomas.epperson@snapon.com>
 Date: Fri, 23 Aug 2024 16:51:27 -0500
 Subject: [PATCH] Add the device tree to the kernel.
+Upstream-Status: Pending
 
 ---
  arch/arm64/boot/dts/Makefile             |    1 +

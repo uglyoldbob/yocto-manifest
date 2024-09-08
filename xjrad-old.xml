@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+  <remote name="yocto" fetch="https://git.yoctoproject.org" />
+  <remote name="oe" fetch="https://github.com/openembedded" />
+  <remote fetch="https://github.com/uglyoldbob" name="uglyoldbob"/>
+  <remote fetch="https://github.com/sbabic"        name="sbabic"/>
+  <remote fetch="https://github.com/kraj"          name="clang"/>
+  <remote fetch="https://github.com/OE4T" name="oe4t"/>
+  
+  <project name="oe-custom" revision="refs/heads/master" remote="uglyoldbob" path="sources/meta-uglyoldbob"/>
+  <project name="poky" revision="refs/heads/kirkstone" remote="yocto" path="sources/poky" />
+  <project name="meta-virtualization" revision="refs/heads/kirkstone" remote="yocto" path="sources/meta-virtualization" />
+  <project name="meta-openembedded" revision="refs/heads/kirkstone"  remote="oe" path="sources/meta-openembedded" />
+  <project name="meta-swupdate" revision="refs/heads/kirkstone" remote="sbabic" path="sources/meta-swupdate" />
+  <project name="meta-clang" revision="refs/heads/kirkstone" remote="clang" path="sources/meta-clang" />
+  <project name="meta-tegra" revision="refs/heads/kirkstone-l4t-r32.7.x" remote="oe4t" path="sources/meta-tegra" />
+  <project name="meta-tegra-community" revision="refs/heads/kirkstone-l4t-r32.7.x" remote="oe4t" path="sources/meta-tegra-community" />
+</manifest>

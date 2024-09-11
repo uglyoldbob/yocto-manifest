@@ -51,7 +51,6 @@ IMAGE_INSTALL += " \
 	pulseaudio-lib-alsa-util \
 	bluealsa \
 	gdb \
-	mesa-demos \
 	strace \
 	evtest \
 "

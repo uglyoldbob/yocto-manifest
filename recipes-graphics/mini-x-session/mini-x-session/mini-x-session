@@ -35,5 +35,5 @@ xrandr -s 1024x768
 # Default files to run if $HOME/.mini_x/session or /etc/mini_x/session
 # dont exist. 
 
-sudo -b -i -u gumstix /usr/bin/run-gprogs.sh&
+#sudo -b -i -u gumstix /usr/bin/run-gprogs.sh&
 exec matchbox-window-manager

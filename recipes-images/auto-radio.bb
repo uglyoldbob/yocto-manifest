@@ -32,6 +32,7 @@ IMAGE_INSTALL += " \
 
 IMAGE_INSTALL += " \
 	kernel-base \
+	kernel-devicetree \
 	swupdate \
 	swupdate-www \
 	openssh \
@@ -49,6 +50,10 @@ IMAGE_INSTALL += " \
 	pulseaudio-server \
 	pulseaudio-lib-alsa-util \
 	bluealsa \
+	gdb \
+	mesa-demos \
+	strace \
+	evtest \
 "
 
 #alsaloop -C bluealsa:DEV=(address),PROFILE=a2dp -P plughw:0,3 -r 32000 -c 2 -f S16_LE --sync=simple -t 50000 -T 1

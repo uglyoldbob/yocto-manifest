@@ -12,6 +12,10 @@ include ${BPN}-crates.inc
 
 S = "${WORKDIR}/git"
 
+INSANE_SKIP:${PN}-dbg += "buildpaths"
+
+DEBUG_BUILD="1"
+
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 SRC_URI += " \

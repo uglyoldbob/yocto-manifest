@@ -1,1 +1,1 @@
-part / --source rootfs --ondisk mmcblk2 --fstype=ext4 --label root --align 4
+part / --source rootfs --ondisk mmcblk2 --fstype=ext4 --label root --align 4 --mkfs-extraopts "-O ^orphan_file"

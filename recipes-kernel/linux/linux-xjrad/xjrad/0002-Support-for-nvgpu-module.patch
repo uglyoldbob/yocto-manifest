@@ -1,0 +1,259 @@
+From 23a3c17cac6b5d32638b87d9464814751a9baf52 Mon Sep 17 00:00:00 2001
+From: Thomas Epperson <thomas.epperson@snapon.com>
+Date: Fri, 13 Sep 2024 12:10:10 -0500
+Subject: [PATCH] Support for nvgpu module.
+
+---
+ drivers/dma-buf/dma-buf.c              | 49 +++++++++++++++++++++++
+ drivers/soc/tegra/fuse/tegra-apbmisc.c | 40 ++++++++++++++++++-
+ include/linux/dma-buf.h                |  8 ++++
+ include/soc/tegra/fuse.h               | 54 ++++++++++++++++++++++++++
+ 4 files changed, 149 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/dma-buf/dma-buf.c b/drivers/dma-buf/dma-buf.c
+index 21916bba77d5..f4ca25db6fc3 100644
+--- a/drivers/dma-buf/dma-buf.c
++++ b/drivers/dma-buf/dma-buf.c
+@@ -42,6 +42,55 @@ struct dma_buf_list {
+ 
+ static struct dma_buf_list db_list;
+ 
++/**
++ * dma_buf_set_drvdata - Set driver specific data to dmabuf. The data
++ * will remain even if the device is detached from the device. This is useful
++ * if the device requires some buffer specific parameters that should be
++ * available when the buffer is accessed next time.
++ *
++ * The exporter calls the destroy callback:
++ *  - the buffer is freed
++ *  - the device/driver is removed
++ *  - new device private data is set
++ *
++ * @dmabuf	[in]	Buffer object
++ * @device	[in]	Device to which the data is related to.
++ * @priv	[in]	Private data
++ * @destroy	[in]	Function callback to destroy function. Called when the
++ *			data is not needed anymore (device or dmabuf is
++ *			removed)
++ *
++ * The function returns 0 on success. Otherwise the function returns a negative
++ * errorcode
++ */
++int dma_buf_set_drvdata(struct dma_buf * dmabuf, struct device *device,
++			void *priv, void (*destroy)(void *))
++{
++	if (!(dmabuf && dmabuf->ops && dmabuf->ops->set_drvdata))
++		return -ENOSYS;
++
++	return dmabuf->ops->set_drvdata(dmabuf, device, priv, destroy);
++}
++EXPORT_SYMBOL(dma_buf_set_drvdata);
++
++/**
++ * dma_buf_get_drvdata - Get driver specific data to dmabuf.
++ *
++ * @dmabuf	[in]	Buffer object
++ * @device	[in]	Device to which the data is related to.
++ *
++ * The function returns the user data structure on success. Otherwise NULL
++ * is returned.
++ */
++void *dma_buf_get_drvdata(struct dma_buf *dmabuf, struct device *device)
++{
++	if (!(dmabuf && dmabuf->ops && dmabuf->ops->get_drvdata))
++		return ERR_PTR(-ENOSYS);
++
++	return dmabuf->ops->get_drvdata(dmabuf, device);
++}
++EXPORT_SYMBOL(dma_buf_get_drvdata);
++
+ static char *dmabuffs_dname(struct dentry *dentry, char *buffer, int buflen)
+ {
+ 	struct dma_buf *dmabuf;
+diff --git a/drivers/soc/tegra/fuse/tegra-apbmisc.c b/drivers/soc/tegra/fuse/tegra-apbmisc.c
+index da970f3dbf35..8229013a4e84 100644
+--- a/drivers/soc/tegra/fuse/tegra-apbmisc.c
++++ b/drivers/soc/tegra/fuse/tegra-apbmisc.c
+@@ -78,6 +78,12 @@ bool tegra_is_silicon(void)
+ 	return true;
+ }
+ 
++enum tegra_revision tegra_chip_get_revision(void)
++{
++	return tegra_sku_info.id_and_rev;
++}
++EXPORT_SYMBOL(tegra_chip_get_revision);
++
+ u32 tegra_read_straps(void)
+ {
+ 	WARN(!chipid, "Tegra ABP MISC not yet available\n");
+@@ -128,10 +134,40 @@ static const struct of_device_id apbmisc_match[] __initconst = {
+ 	{},
+ };
+ 
++struct chip_revision {
++	enum tegra_chipid	chipid;
++	unsigned int		major;
++	unsigned int		minor;
++	char			sub_type;
++	enum tegra_revision	revision;
++	enum tegra_revision	id_and_rev;
++};
++
++#define CHIP_REVISION(id, maj, min, sub, rev) {	\
++	.chipid = id,				\
++	.major = maj,				\
++	.minor = min,				\
++	.sub_type = sub,			\
++	.revision = TEGRA_REVISION_##rev,	\
++	.id_and_rev = id##_REVISION_##rev }	\
++
++static struct chip_revision tegra_chip_revisions[] = {
++	CHIP_REVISION(TEGRA210, 1, 1, 0,   A01),
++	CHIP_REVISION(TEGRA210, 1, 1, 'q', A01q),
++	CHIP_REVISION(TEGRA210, 1, 2, 0,   A02),
++	CHIP_REVISION(TEGRA210B01, 2, 1, 0, A01),
++	CHIP_REVISION(TEGRA186, 1, 1, 0,   A01),
++	CHIP_REVISION(TEGRA186, 1, 2, 0,   A02),
++	CHIP_REVISION(TEGRA186, 1, 2, 'p', A02p),
++	CHIP_REVISION(TEGRA194, 1, 1, 0, A01),
++	CHIP_REVISION(TEGRA194, 1, 2, 0, A02),
++	CHIP_REVISION(TEGRA194, 1, 2, 'p', A02p),
++};
++
+ void __init tegra_init_revision(void)
+ {
+-	u8 chip_id, minor_rev;
+-
++	u8 chip_id, major_rev, minor_rev;
++	enum tegra_revision id_and_rev = TEGRA_REVISION_UNKNOWN;
+ 	chip_id = tegra_get_chip_id();
+ 	minor_rev = tegra_get_minor_rev();
+ 
+diff --git a/include/linux/dma-buf.h b/include/linux/dma-buf.h
+index 3f31baa3293f..e10372aba9d8 100644
+--- a/include/linux/dma-buf.h
++++ b/include/linux/dma-buf.h
+@@ -285,6 +285,10 @@ struct dma_buf_ops {
+ 
+ 	int (*vmap)(struct dma_buf *dmabuf, struct iosys_map *map);
+ 	void (*vunmap)(struct dma_buf *dmabuf, struct iosys_map *map);
++	
++	void *(*get_drvdata)(struct dma_buf *, struct device *);
++	int (*set_drvdata)(struct dma_buf *, struct device *, void *priv,
++			   void (*)(void *));
+ };
+ 
+ /**
+@@ -609,6 +613,10 @@ int dma_buf_fd(struct dma_buf *dmabuf, int flags);
+ struct dma_buf *dma_buf_get(int fd);
+ void dma_buf_put(struct dma_buf *dmabuf);
+ 
++int dma_buf_set_drvdata(struct dma_buf *, struct device *,
++			void *, void (*destroy)(void *));
++void *dma_buf_get_drvdata(struct dma_buf *, struct device *);
++
+ struct sg_table *dma_buf_map_attachment(struct dma_buf_attachment *,
+ 					enum dma_data_direction);
+ void dma_buf_unmap_attachment(struct dma_buf_attachment *, struct sg_table *,
+diff --git a/include/soc/tegra/fuse.h b/include/soc/tegra/fuse.h
+index 3a513be50243..fe1761a9f4cd 100644
+--- a/include/soc/tegra/fuse.h
++++ b/include/soc/tegra/fuse.h
+@@ -14,6 +14,7 @@
+ #define TEGRA124	0x40
+ #define TEGRA132	0x13
+ #define TEGRA210	0x21
++#define TEGRA210B01	0x21
+ #define TEGRA186	0x18
+ #define TEGRA194	0x19
+ #define TEGRA234	0x23
+@@ -28,16 +29,43 @@
+ enum tegra_revision {
+ 	TEGRA_REVISION_UNKNOWN = 0,
+ 	TEGRA_REVISION_A01,
++	TEGRA_REVISION_A01q,
+ 	TEGRA_REVISION_A02,
++	TEGRA_REVISION_A02p,
+ 	TEGRA_REVISION_A03,
+ 	TEGRA_REVISION_A03p,
+ 	TEGRA_REVISION_A04,
++	TEGRA_REVISION_A04p,
++	TEGRA210_REVISION_A01,
++	TEGRA210_REVISION_A01q,
++	TEGRA210_REVISION_A02,
++	TEGRA210_REVISION_A02p,
++	TEGRA210_REVISION_A03,
++	TEGRA210_REVISION_A03p,
++	TEGRA210_REVISION_A04,
++	TEGRA210_REVISION_A04p,
++	TEGRA210B01_REVISION_A01,
++	TEGRA186_REVISION_A01,
++	TEGRA186_REVISION_A01q,
++	TEGRA186_REVISION_A02,
++	TEGRA186_REVISION_A02p,
++	TEGRA186_REVISION_A03,
++	TEGRA186_REVISION_A03p,
++	TEGRA186_REVISION_A04,
++	TEGRA186_REVISION_A04p,
++	TEGRA194_REVISION_A01,
++	TEGRA194_REVISION_A02,
++	TEGRA194_REVISION_A02p,
++	TEGRA_REVISION_QT,
++	TEGRA_REVISION_SIM,
+ 	TEGRA_REVISION_MAX,
+ };
+ 
+ enum tegra_platform {
+ 	TEGRA_PLATFORM_SILICON = 0,
+ 	TEGRA_PLATFORM_QT,
++	TEGRA_PLATFORM_LINSIM,
++	TEGRA_PLATFORM_FPGA,
+ 	TEGRA_PLATFORM_SYSTEM_FPGA,
+ 	TEGRA_PLATFORM_UNIT_FPGA,
+ 	TEGRA_PLATFORM_ASIM_QT,
+@@ -49,6 +77,28 @@ enum tegra_platform {
+ 	TEGRA_PLATFORM_MAX,
+ };
+ 
++enum tegra_chipid {
++	TEGRA_CHIPID_UNKNOWN = 0,
++	TEGRA_CHIPID_TEGRA14 = 0x14,
++	TEGRA_CHIPID_TEGRA2 = 0x20,
++	TEGRA_CHIPID_TEGRA3 = 0x30,
++	TEGRA_CHIPID_TEGRA11 = 0x35,
++	TEGRA_CHIPID_TEGRA12 = 0x40,
++	TEGRA_CHIPID_TEGRA13 = 0x13,
++	TEGRA_CHIPID_TEGRA21 = 0x21,
++	TEGRA_CHIPID_TEGRA18 = 0x18,
++	TEGRA_CHIPID_TEGRA19 = 0x19,
++	TEGRA_CHIPID_TEGRA23 = 0x23,
++};
++
++enum tegra_ucm {
++	TEGRA_UCM1 = 0,
++	TEGRA_UCM2,
++};
++
++/* wrappers for the old fuse.h names */
++#define soc_process_id core_process_id
++
+ struct tegra_sku_info {
+ 	int sku_id;
+ 	int cpu_process_id;
+@@ -61,8 +111,12 @@ struct tegra_sku_info {
+ 	int gpu_process_id;
+ 	int gpu_speedo_id;
+ 	int gpu_speedo_value;
++	int gpu_iddq_value;
+ 	enum tegra_revision revision;
++	enum tegra_revision id_and_rev;
+ 	enum tegra_platform platform;
++	enum tegra_ucm ucm;
++	int speedo_rev;
+ };
+ 
+ #ifdef CONFIG_ARCH_TEGRA
+-- 
+2.34.1
+

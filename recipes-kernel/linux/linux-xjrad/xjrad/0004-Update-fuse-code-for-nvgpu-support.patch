@@ -1,0 +1,281 @@
+From c37ea58825d38d7f21992e17ca6ecb2f0668589b Mon Sep 17 00:00:00 2001
+From: Thomas Epperson <thomas.epperson@snapon.com>
+Date: Fri, 13 Sep 2024 16:31:35 -0500
+Subject: [PATCH] Update fuse code for nvgpu support.
+
+---
+ drivers/soc/tegra/fuse/Makefile         |   1 +
+ drivers/soc/tegra/fuse/tegra-apbmisc.c  |   5 -
+ drivers/soc/tegra/fuse/tegra-platform.c | 167 ++++++++++++++++++++++++
+ include/soc/tegra/fuse.h                |  36 ++++-
+ 4 files changed, 202 insertions(+), 7 deletions(-)
+ create mode 100644 drivers/soc/tegra/fuse/tegra-platform.c
+
+diff --git a/drivers/soc/tegra/fuse/Makefile b/drivers/soc/tegra/fuse/Makefile
+index ea8332cc3980..aac474335620 100644
+--- a/drivers/soc/tegra/fuse/Makefile
++++ b/drivers/soc/tegra/fuse/Makefile
+@@ -2,6 +2,7 @@
+ obj-y					+= fuse-tegra.o
+ obj-y					+= fuse-tegra30.o
+ obj-y					+= tegra-apbmisc.o
++obj-y					+= tegra-platform.o
+ obj-$(CONFIG_ARCH_TEGRA_2x_SOC)		+= fuse-tegra20.o
+ obj-$(CONFIG_ARCH_TEGRA_2x_SOC)		+= speedo-tegra20.o
+ obj-$(CONFIG_ARCH_TEGRA_3x_SOC)		+= speedo-tegra30.o
+diff --git a/drivers/soc/tegra/fuse/tegra-apbmisc.c b/drivers/soc/tegra/fuse/tegra-apbmisc.c
+index 92e61b908443..2e17b33f1535 100644
+--- a/drivers/soc/tegra/fuse/tegra-apbmisc.c
++++ b/drivers/soc/tegra/fuse/tegra-apbmisc.c
+@@ -150,11 +150,6 @@ u8 tegra_get_minor_rev(void)
+ 	return (tegra_read_chipid() >> 16) & 0xf;
+ }
+ 
+-u8 tegra_get_platform(void)
+-{
+-	return (tegra_read_chipid() >> 20) & 0xf;
+-}
+-
+ bool tegra_is_silicon(void)
+ {
+ 	switch (tegra_get_chip_id()) {
+diff --git a/drivers/soc/tegra/fuse/tegra-platform.c b/drivers/soc/tegra/fuse/tegra-platform.c
+new file mode 100644
+index 000000000000..3e99db005a65
+--- /dev/null
++++ b/drivers/soc/tegra/fuse/tegra-platform.c
+@@ -0,0 +1,167 @@
++/*
++ * Copyright (c) 2014-2016, NVIDIA CORPORATION.  All rights reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms and conditions of the GNU General Public License,
++ * version 2, as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
++ * more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
++ *
++ */
++
++#include <linux/export.h>
++#include <soc/tegra/fuse.h>
++
++#define MINOR_QT		0
++#define MINOR_FPGA		1
++#define MINOR_ASIM_QT		2
++#define MINOR_ASIM_LINSIM	3
++#define MINOR_DSIM_ASIM_LINSIM	4
++#define MINOR_UNIT_FPGA		5
++#define MINOR_VDK		6
++
++#define PRE_SI_QT		1
++#define PRE_SI_FPGA		2
++#define PRE_SI_UNIT_FPGA	3
++#define PRE_SI_ASIM_QT		4
++#define PRE_SI_ASIM_LINSIM	5
++#define PRE_SI_DSIM_ASIM_LINSIM	6
++#define PRE_SI_VDK		8
++
++int tegra_get_platform(void)
++{
++	u32 chipid, major, pre_si_plat;
++
++	chipid = tegra_read_chipid();
++	major = tegra_hidrev_get_majorrev(chipid);
++	pre_si_plat = tegra_hidrev_get_pre_si_plat(chipid);
++
++	if (!major) {
++		u32 minor;
++
++		minor = tegra_hidrev_get_minorrev(chipid);
++		switch (minor) {
++		case MINOR_QT:
++			return TEGRA_PLATFORM_QT;
++		case MINOR_FPGA:
++			return TEGRA_PLATFORM_FPGA;
++		case MINOR_ASIM_QT:
++			return TEGRA_PLATFORM_QT;
++		case MINOR_ASIM_LINSIM:
++			return TEGRA_PLATFORM_LINSIM;
++		case MINOR_DSIM_ASIM_LINSIM:
++			return TEGRA_PLATFORM_LINSIM;
++		case MINOR_UNIT_FPGA:
++			return TEGRA_PLATFORM_UNIT_FPGA;
++		case MINOR_VDK:
++			return TEGRA_PLATFORM_VDK;
++		}
++	} else if (pre_si_plat) {
++		switch (pre_si_plat) {
++		case PRE_SI_QT:
++			return TEGRA_PLATFORM_QT;
++		case PRE_SI_FPGA:
++			return TEGRA_PLATFORM_FPGA;
++		case PRE_SI_UNIT_FPGA:
++			return TEGRA_PLATFORM_UNIT_FPGA;
++		case PRE_SI_ASIM_QT:
++			return TEGRA_PLATFORM_QT;
++		case PRE_SI_ASIM_LINSIM:
++			return TEGRA_PLATFORM_LINSIM;
++		case PRE_SI_DSIM_ASIM_LINSIM:
++			return TEGRA_PLATFORM_LINSIM;
++		case PRE_SI_VDK:
++			return TEGRA_PLATFORM_VDK;
++		}
++	}
++
++	return TEGRA_PLATFORM_SILICON;
++}
++EXPORT_SYMBOL(tegra_get_platform);
++
++int tegra_cpu_is_asim(void)
++{
++	u32 chipid, major, pre_si_plat;
++
++	chipid = tegra_read_chipid();
++	major = tegra_hidrev_get_majorrev(chipid);
++	pre_si_plat = tegra_hidrev_get_pre_si_plat(chipid);
++
++	if (!major) {
++		u32 minor;
++
++		minor = tegra_hidrev_get_minorrev(chipid);
++		switch (minor) {
++		case MINOR_QT:
++		case MINOR_FPGA:
++			return 0;
++		case MINOR_ASIM_QT:
++		case MINOR_ASIM_LINSIM:
++		case MINOR_DSIM_ASIM_LINSIM:
++		case MINOR_UNIT_FPGA:
++		case MINOR_VDK:
++			return 1;
++		}
++	} else if (pre_si_plat) {
++		switch (pre_si_plat) {
++		case PRE_SI_QT:
++		case PRE_SI_FPGA:
++			return 0;
++		case PRE_SI_UNIT_FPGA:
++		case PRE_SI_ASIM_QT:
++		case PRE_SI_ASIM_LINSIM:
++		case PRE_SI_DSIM_ASIM_LINSIM:
++		case PRE_SI_VDK:
++			return 1;
++		}
++	}
++
++	return 0;
++}
++EXPORT_SYMBOL_GPL(tegra_cpu_is_asim);
++
++bool tegra_cpu_is_dsim(void)
++{
++	u32 chipid, major, pre_si_plat;
++
++	chipid = tegra_read_chipid();
++	major = tegra_hidrev_get_majorrev(chipid);
++	pre_si_plat = tegra_hidrev_get_pre_si_plat(chipid);
++
++	if (!major) {
++		u32 minor;
++
++		minor = tegra_hidrev_get_minorrev(chipid);
++		switch (minor) {
++		case MINOR_QT:
++		case MINOR_FPGA:
++		case MINOR_ASIM_QT:
++		case MINOR_ASIM_LINSIM:
++		case MINOR_UNIT_FPGA:
++		case MINOR_VDK:
++			return false;
++		case MINOR_DSIM_ASIM_LINSIM:
++			return true;
++		}
++	} else if (pre_si_plat) {
++		switch (pre_si_plat) {
++		case PRE_SI_QT:
++		case PRE_SI_FPGA:
++		case PRE_SI_UNIT_FPGA:
++		case PRE_SI_ASIM_QT:
++		case PRE_SI_ASIM_LINSIM:
++		case PRE_SI_VDK:
++			return false;
++		case PRE_SI_DSIM_ASIM_LINSIM:
++			return true;
++		}
++	}
++
++	return false;
++}
+diff --git a/include/soc/tegra/fuse.h b/include/soc/tegra/fuse.h
+index 64834fac9b24..f97e18a4da41 100644
+--- a/include/soc/tegra/fuse.h
++++ b/include/soc/tegra/fuse.h
+@@ -24,6 +24,16 @@
+ #define TEGRA30_FUSE_SATA_CALIB	0x124
+ #define TEGRA_FUSE_USB_CALIB_EXT_0 0x250
+ 
++/* Tegra HIDREV/ChipID helper macros */
++#define HIDREV_CHIPID_SHIFT		0x8
++#define HIDREV_CHIPID_MASK		0xff
++#define HIDREV_MAJORREV_SHIFT		0x4
++#define HIDREV_MAJORREV_MASK		0xf
++#define HIDREV_MINORREV_SHIFT		0x10
++#define HIDREV_MINORREV_MASK		0xf
++#define HIDREV_PRE_SI_PLAT_SHIFT	0x14
++#define HIDREV_PRE_SI_PLAT_MASK		0xf
++
+ #ifndef __ASSEMBLY__
+ 
+ enum tegra_revision {
+@@ -127,10 +137,32 @@ int tegra_fuse_readl(unsigned long offset, u32 *value);
+ u32 tegra_read_chipid(void);
+ u8 tegra_get_chip_id(void);
+ enum tegra_chipid tegra_get_chipid(void);
+-u8 tegra_get_platform(void);
++int tegra_get_platform(void);
+ bool tegra_is_silicon(void);
+ int tegra194_miscreg_mask_serror(void);
+ extern u32 tegra_read_emu_revid(void);
++
++/* Helper functions to read HIDREV fields */
++static inline u32 tegra_hidrev_get_chipid(u32 chipid)
++{
++	return (chipid >> HIDREV_CHIPID_SHIFT) & HIDREV_CHIPID_MASK;
++}
++
++static inline u32 tegra_hidrev_get_majorrev(u32 chipid)
++{
++	return (chipid >> HIDREV_MAJORREV_SHIFT) & HIDREV_MAJORREV_MASK;
++}
++
++static inline u32 tegra_hidrev_get_minorrev(u32 chipid)
++{
++	return (chipid >> HIDREV_MINORREV_SHIFT) & HIDREV_MINORREV_MASK;
++}
++
++static inline u32 tegra_hidrev_get_pre_si_plat(u32 chipid)
++{
++	return (chipid >> HIDREV_PRE_SI_PLAT_SHIFT) & HIDREV_PRE_SI_PLAT_MASK;
++}
++
+ #else
+ static struct tegra_sku_info tegra_sku_info __maybe_unused;
+ 
+@@ -159,7 +191,7 @@ static inline u8 tegra_get_chip_id(void)
+ 	return 0;
+ }
+ 
+-static inline u8 tegra_get_platform(void)
++static inline int tegra_get_platform(void)
+ {
+ 	return 0;
+ }
+-- 
+2.34.1
+

@@ -6,11 +6,11 @@ DEPENDS = "u-boot-tools-native"
 SRC_URI = "file://boot.cmd"
 
 do_compile() {
-   ${WORKDIR}/recipe-sysroot-native/usr/bin/mkimage -C none -A arm -T script -d ${WORKDIR}/boot.cmd ${WORKDIR}/boot.scr
+   ${WORKDIR}/recipe-sysroot-native/usr/bin/mkimage -C none -A arm -T script -d ${UNPACKDIR}/boot.cmd ${UNPACKDIR}/boot.scr
 }
 
 do_install() {
-	cp ${WORKDIR}/boot.scr ${D}/boot.scr
+	cp ${UNPACKDIR}/boot.scr ${D}/boot.scr
 }
 
 FILES:${PN} = "/boot.scr"

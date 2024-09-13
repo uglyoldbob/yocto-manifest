@@ -1,0 +1,1304 @@
+From af5418030837ad03e43a0431f69a862a0946e3f6 Mon Sep 17 00:00:00 2001
+From: Thomas Epperson <thomas.epperson@snapon.com>
+Date: Fri, 13 Sep 2024 15:45:28 -0500
+Subject: [PATCH] Add vpr code for nvgpu support.
+
+---
+ arch/arm64/include/asm/dma-iommu.h         |  47 +++
+ drivers/iommu/Makefile                     |   1 +
+ drivers/iommu/tegra-iommu.c                | 326 +++++++++++++++++++++
+ drivers/platform/Makefile                  |   1 +
+ drivers/platform/tegra/Makefile            |   2 +
+ drivers/platform/tegra/smc-calls.S         |  30 ++
+ drivers/platform/tegra/tegra_vpr.c         | 199 +++++++++++++
+ drivers/soc/tegra/fuse/tegra-apbmisc.c     | 115 +++++++-
+ include/dt-bindings/memory/tegra-swgroup.h | 252 ++++++++++++++++
+ include/linux/dma-mapping.h                |   9 +
+ include/linux/iommu.h                      |  11 +
+ include/linux/ote_protocol.h               |  29 ++
+ include/linux/platform/tegra/common.h      |  63 ++++
+ include/soc/tegra/fuse.h                   |   2 +
+ include/soc/tegra/memory-carveout.h        |  26 ++
+ 15 files changed, 1112 insertions(+), 1 deletion(-)
+ create mode 100644 arch/arm64/include/asm/dma-iommu.h
+ create mode 100644 drivers/iommu/tegra-iommu.c
+ create mode 100644 drivers/platform/tegra/Makefile
+ create mode 100644 drivers/platform/tegra/smc-calls.S
+ create mode 100644 drivers/platform/tegra/tegra_vpr.c
+ create mode 100644 include/dt-bindings/memory/tegra-swgroup.h
+ create mode 100644 include/linux/ote_protocol.h
+ create mode 100644 include/linux/platform/tegra/common.h
+ create mode 100644 include/soc/tegra/memory-carveout.h
+
+diff --git a/arch/arm64/include/asm/dma-iommu.h b/arch/arm64/include/asm/dma-iommu.h
+new file mode 100644
+index 000000000000..c4fc0a7710a4
+--- /dev/null
++++ b/arch/arm64/include/asm/dma-iommu.h
+@@ -0,0 +1,47 @@
++#ifndef ASMARM_DMA_IOMMU_H
++#define ASMARM_DMA_IOMMU_H
++
++#ifdef __KERNEL__
++
++#include <linux/mm_types.h>
++#include <linux/scatterlist.h>
++#include <linux/dma-map-ops.h>
++#include <linux/kref.h>
++#include <linux/iova.h>
++
++struct dma_iommu_mapping {
++	/* iommu specific data */
++	struct iommu_domain	*domain;
++
++	dma_addr_t		base;
++	dma_addr_t		end;
++
++	spinlock_t		lock;
++	struct kref		kref;
++
++	bool			gap_page;
++	int			num_pf_page;
++	/* FIXME: currently only alignment of 2^n is supported */
++	size_t			alignment;
++
++#ifdef CONFIG_DMA_API_DEBUG
++	atomic64_t		map_size;
++	atomic64_t		atomic_alloc_size;
++	atomic64_t		alloc_size;
++	atomic64_t		cpu_map_size;
++#endif
++
++	struct list_head	list;
++};
++
++struct dma_iommu_mapping *
++arm_iommu_create_mapping(struct bus_type *bus, dma_addr_t base, size_t size);
++
++void arm_iommu_release_mapping(struct dma_iommu_mapping *mapping);
++
++int arm_iommu_attach_device(struct device *dev,
++					struct dma_iommu_mapping *mapping);
++void arm_iommu_detach_device(struct device *dev);
++
++#endif /* __KERNEL__ */
++#endif
+diff --git a/drivers/iommu/Makefile b/drivers/iommu/Makefile
+index 769e43d780ce..4199172312df 100644
+--- a/drivers/iommu/Makefile
++++ b/drivers/iommu/Makefile
+@@ -21,6 +21,7 @@ obj-$(CONFIG_OMAP_IOMMU_DEBUG) += omap-iommu-debug.o
+ obj-$(CONFIG_ROCKCHIP_IOMMU) += rockchip-iommu.o
+ obj-$(CONFIG_SUN50I_IOMMU) += sun50i-iommu.o
+ obj-$(CONFIG_TEGRA_IOMMU_GART) += tegra-gart.o
++obj-$(CONFIG_TEGRA_IOMMU_SMMU) += tegra-iommu.o
+ obj-$(CONFIG_TEGRA_IOMMU_SMMU) += tegra-smmu.o
+ obj-$(CONFIG_EXYNOS_IOMMU) += exynos-iommu.o
+ obj-$(CONFIG_FSL_PAMU) += fsl_pamu.o fsl_pamu_domain.o
+diff --git a/drivers/iommu/tegra-iommu.c b/drivers/iommu/tegra-iommu.c
+new file mode 100644
+index 000000000000..f77aac2bd3af
+--- /dev/null
++++ b/drivers/iommu/tegra-iommu.c
+@@ -0,0 +1,326 @@
++/*
++ * Copyright (c) 2014-2018, NVIDIA CORPORATION.  All rights reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms and conditions of the GNU General Public License,
++ * version 2, as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
++ * more details.
++ */
++
++#include <linux/platform_device.h>
++#include <linux/dma-mapping.h>
++#include <linux/dma-direct.h>
++#include <linux/iommu.h>
++
++#include <soc/tegra/fuse.h>
++
++#include <asm/dma-iommu.h>
++
++#include <dt-bindings/memory/tegra-swgroup.h>
++
++#include <soc/tegra/memory-carveout.h>
++#include <linux/platform/tegra/common.h>
++#include <soc/tegra/common.h>
++
++phys_addr_t tegra_carveout_start;
++phys_addr_t tegra_carveout_size;
++phys_addr_t tegra_vpr_start;
++phys_addr_t tegra_vpr_size;
++bool tegra_vpr_resize;
++
++/* FIXME: Use DT reserved-memory node */
++phys_addr_t __weak tegra_fb_start, tegra_fb_size,
++	tegra_fb2_start, tegra_fb2_size,
++	tegra_fb3_start, tegra_fb3_size,
++	tegra_fb4_start, tegra_fb4_size,
++	tegra_bootloader_fb_start, tegra_bootloader_fb_size,
++	tegra_bootloader_fb2_start, tegra_bootloader_fb2_size,
++	tegra_bootloader_fb3_start, tegra_bootloader_fb3_size,
++	tegra_bootloader_fb4_start, tegra_bootloader_fb4_size,
++	tegra_bootloader_lut_start, tegra_bootloader_lut_size,
++	tegra_bootloader_lut2_start, tegra_bootloader_lut2_size,
++	tegra_bootloader_lut3_start, tegra_bootloader_lut3_size,
++	tegra_bootloader_lut4_start, tegra_bootloader_lut4_size;
++
++static struct iommu_linear_map tegra_fb_linear_map[16]; /* Terminated with 0 */
++
++#define LINEAR_MAP_ADD(n) \
++do { \
++	if (n##_start && n##_size) { \
++		map[i].start = n##_start; \
++		map[i++].size = n##_size; \
++	} \
++} while (0)
++
++#if defined(CONFIG_DMA_CMA) && defined(CONFIG_TEGRA_NVMAP)
++static void carveout_linear_set(struct device *cma_dev)
++{
++	struct dma_contiguous_stats stats;
++	struct iommu_linear_map *map = &tegra_fb_linear_map[0];
++
++	if (dma_get_contiguous_stats(cma_dev, &stats))
++		return;
++
++	/* get the free slot at end and add carveout entry */
++	while (map && map->size)
++		map++;
++	map->start = stats.base;
++	map->size = stats.size;
++}
++#endif
++
++static void cma_carveout_linear_set(void)
++{
++
++#if defined(CONFIG_DMA_CMA) && defined(CONFIG_TEGRA_NVMAP)
++	if (tegra_vpr_resize) {
++		carveout_linear_set(&tegra_generic_cma_dev);
++		carveout_linear_set(&tegra_vpr_cma_dev);
++	}
++#endif
++
++}
++
++void tegra_fb_linear_set(struct iommu_linear_map *map)
++{
++	int i = 0;
++
++	map = tegra_fb_linear_map;
++
++	LINEAR_MAP_ADD(tegra_fb);
++	LINEAR_MAP_ADD(tegra_fb2);
++	LINEAR_MAP_ADD(tegra_fb3);
++	LINEAR_MAP_ADD(tegra_fb4);
++	LINEAR_MAP_ADD(tegra_bootloader_fb);
++	LINEAR_MAP_ADD(tegra_bootloader_fb2);
++	LINEAR_MAP_ADD(tegra_bootloader_fb3);
++	LINEAR_MAP_ADD(tegra_bootloader_fb4);
++	LINEAR_MAP_ADD(tegra_bootloader_lut);
++	LINEAR_MAP_ADD(tegra_bootloader_lut2);
++	LINEAR_MAP_ADD(tegra_bootloader_lut3);
++	LINEAR_MAP_ADD(tegra_bootloader_lut4);
++#ifdef CONFIG_TEGRA_NVMAP
++	if (!tegra_vpr_resize) {
++		LINEAR_MAP_ADD(tegra_vpr);
++		LINEAR_MAP_ADD(tegra_carveout);
++	}
++#endif
++}
++EXPORT_SYMBOL(tegra_fb_linear_set);
++
++struct swgid_fixup {
++	const char * const name;
++	u64 swgids;
++	struct iommu_linear_map *linear_map;
++};
++
++/*
++ * FIXME: They should have a DT entry with swgroup IDs.
++ */
++static struct swgid_fixup tegra_swgid_fixup_t124[] = {
++	{ .name = "nvavp",	.swgids = TEGRA_SWGROUP_BIT(AVPC) |
++					  TEGRA_SWGROUP_BIT(A9AVP), },
++	{ .name = "sdhci-tegra.2",	.swgids = TEGRA_SWGROUP_BIT(SDMMC3A) },
++	{ .name = "serial8250",	.swgids = TEGRA_SWGROUP_BIT(PPCS), },
++	{ .name = "dtv",	.swgids = TEGRA_SWGROUP_BIT(PPCS), },
++	{ .name = "snd-soc-dummy",	.swgids = TEGRA_SWGROUP_BIT(PPCS), },
++	{ .name = "spdif-dit",	.swgids = TEGRA_SWGROUP_BIT(PPCS), },
++	{ .name = "tegra12-se",	.swgids = TEGRA_SWGROUP_BIT(PPCS), },
++	{ .name = "tegra30-ahub",	.swgids = TEGRA_SWGROUP_BIT(PPCS), },
++	{ .name = "tegra30-dam",	.swgids = TEGRA_SWGROUP_BIT(PPCS), },
++	{ .name = "tegra30-hda",	.swgids = TEGRA_SWGROUP_BIT(HDA), },
++	{ .name = "tegra30-i2s",	.swgids = TEGRA_SWGROUP_BIT(PPCS), },
++	{ .name = "tegra30-spdif",	.swgids = TEGRA_SWGROUP_BIT(PPCS), },
++	{ .name = "tegra30-avp-audio",	.swgids = TEGRA_SWGROUP_BIT(AVPC) |
++						  TEGRA_SWGROUP_BIT(A9AVP), },
++	{ .name = "tegradc.0", .swgids = TEGRA_SWGROUP_BIT(DC) |
++					 TEGRA_SWGROUP_BIT(DC12),
++	  .linear_map = tegra_fb_linear_map, },
++	{ .name = "tegradc.1", .swgids = TEGRA_SWGROUP_BIT(DCB),
++	  .linear_map = tegra_fb_linear_map, },
++	{ .name = "tegra-ehci",	.swgids = TEGRA_SWGROUP_BIT(PPCS), },
++	{ .name = "tegra-fuse",	.swgids = TEGRA_SWGROUP_BIT(PPCS), },
++	/*
++	 * PPCS1 selection for USB2 needs AHB_ARBC register program
++	 * in warm boot and cold boot paths in BL as it needs
++	 * secure write.
++	 */
++	{ .name = "tegra-otg",	.swgids = TEGRA_SWGROUP_BIT(PPCS1), },
++	{ .name = "tegra-snd",	.swgids = TEGRA_SWGROUP_BIT(PPCS), },
++	{ .name = "tegra-udc",	.swgids = TEGRA_SWGROUP_BIT(PPCS), },
++	{ .name = "vic",	.swgids = SWGIDS_ERROR_CODE, },
++	{ .name = "vi",	.swgids = TEGRA_SWGROUP_BIT(VI), },
++	{ .name = "therm_est",	.swgids = TEGRA_SWGROUP_BIT(PPCS), },
++	{ .name = "tegra-xhci",	.swgids = TEGRA_SWGROUP_BIT(XUSB_HOST), },
++	{},
++};
++
++static struct swgid_fixup tegra_swgid_fixup_t210[] = {
++	{
++		.name = "bpmp",
++		.swgids = TEGRA_SWGROUP_BIT(AVPC),
++	},
++	{ .name = "serial8250",	.swgids = TEGRA_SWGROUP_BIT(PPCS) |
++					  TEGRA_SWGROUP_BIT(PPCS1) |
++	  TEGRA_SWGROUP_BIT(PPCS2), },
++	{ .name = "snd-soc-dummy",	.swgids = TEGRA_SWGROUP_BIT(PPCS) |
++						  TEGRA_SWGROUP_BIT(PPCS1) |
++	  TEGRA_SWGROUP_BIT(PPCS2), },
++	{ .name = "spdif-dit",	.swgids = TEGRA_SWGROUP_BIT(PPCS) |
++					  TEGRA_SWGROUP_BIT(PPCS1) |
++	  TEGRA_SWGROUP_BIT(PPCS2), },
++	{ .name = "tegra21-se",	.swgids = TEGRA_SWGROUP_BIT(PPCS) |
++					  TEGRA_SWGROUP_BIT(SE) |
++	  TEGRA_SWGROUP_BIT(SE1), },
++	{ .name = "tegra30-hda",	.swgids = TEGRA_SWGROUP_BIT(HDA), },
++	{ .name = "tegra30-spdif",	.swgids = TEGRA_SWGROUP_BIT(PPCS) |
++						  TEGRA_SWGROUP_BIT(PPCS1) |
++	  TEGRA_SWGROUP_BIT(PPCS2), },
++	{ .name = "tegradc.0", .swgids = TEGRA_SWGROUP_BIT(DC) |
++	 TEGRA_SWGROUP_BIT(DC12), .linear_map = tegra_fb_linear_map, },
++	{ .name = "tegradc.1", .swgids = TEGRA_SWGROUP_BIT(DCB),
++				.linear_map = tegra_fb_linear_map, },
++	{ .name = "54200000.dc", .swgids = TEGRA_SWGROUP_BIT(DC) |
++	 TEGRA_SWGROUP_BIT(DC12), .linear_map = tegra_fb_linear_map, },
++	{ .name = "54240000.dc", .swgids = TEGRA_SWGROUP_BIT(DCB),
++				.linear_map = tegra_fb_linear_map, },
++	{ .name = "tegra-fuse",	.swgids = TEGRA_SWGROUP_BIT(PPCS) |
++					  TEGRA_SWGROUP_BIT(PPCS1) |
++	  TEGRA_SWGROUP_BIT(PPCS2), },
++	{ .name = "tegra-otg",	.swgids = TEGRA_SWGROUP_BIT(PPCS) |
++					  TEGRA_SWGROUP_BIT(PPCS1) |
++	  TEGRA_SWGROUP_BIT(PPCS2), },
++	{ .name = "tegra-se",	.swgids = TEGRA_SWGROUP_BIT(PPCS) |
++					  TEGRA_SWGROUP_BIT(PPCS1) |
++	  TEGRA_SWGROUP_BIT(PPCS2), },
++	{ .name = "tegra-udc",	.swgids = TEGRA_SWGROUP_BIT(PPCS) |
++					  TEGRA_SWGROUP_BIT(PPCS1) |
++	  TEGRA_SWGROUP_BIT(PPCS2), },
++	{},
++};
++
++u64 tegra_smmu_fixup_swgids(struct device *dev, struct iommu_linear_map **map)
++{
++	const char *s;
++	struct swgid_fixup *table;
++
++	if (!dev)
++		return SWGIDS_ERROR_CODE;
++
++	switch (tegra_get_chip_id()) {
++	case TEGRA124:
++	case TEGRA132:
++		table = tegra_swgid_fixup_t124;
++		break;
++	case TEGRA210:
++		table = tegra_swgid_fixup_t210;
++		break;
++	default:
++		return SWGIDS_ERROR_CODE;
++	}
++
++	while ((s = table->name) != NULL) {
++		if (strncmp(s, dev_name(dev), strlen(s))) {
++			table++;
++			continue;
++		}
++
++		if (map)
++			*map = table->linear_map;
++
++		if (dev->of_node)
++			break;
++
++		pr_info("No Device Node present for smmu client: %s !!\n",
++			dev_name(dev));
++		break;
++	}
++
++	return table->name ? table->swgids : SWGIDS_ERROR_CODE;
++}
++EXPORT_SYMBOL(tegra_smmu_fixup_swgids);
++
++static int __init tegra_smmu_init(void)
++{
++	tegra_fb_linear_set(NULL);
++	cma_carveout_linear_set();
++	return 0;
++}
++pure_initcall(tegra_smmu_init);
++
++struct iommu_linear_map_mapping {
++	const char * const name;
++	struct iommu_linear_map *map;
++};
++
++static struct iommu_linear_map_mapping t186_linear_map[] = {
++	{
++		.name = "15200000.nvdisplay",
++		.map = tegra_fb_linear_map,
++	},
++	{
++		.name = "15210000.nvdisplay",
++		.map = tegra_fb_linear_map,
++	},
++	{
++		.name = "15220000.nvdisplay",
++		.map = tegra_fb_linear_map,
++	},
++	{},
++};
++
++static struct iommu_linear_map_mapping t194_linear_map[] = {
++	{
++		.name = "15200000.nvdisplay",
++		.map = tegra_fb_linear_map,
++	},
++	{
++		.name = "15210000.nvdisplay",
++		.map = tegra_fb_linear_map,
++	},
++	{
++		.name = "15220000.nvdisplay",
++		.map = tegra_fb_linear_map,
++	},
++	{
++		.name = "15230000.nvdisplay",
++		.map = tegra_fb_linear_map,
++	},
++	{},
++};
++
++
++int iommu_get_linear_map(struct device *dev, struct iommu_linear_map **map)
++{
++	const char *s;
++	struct iommu_linear_map_mapping *table;
++
++	if (!dev)
++		return 0;
++
++	switch (tegra_get_chipid()) {
++	case TEGRA_CHIPID_TEGRA18:
++		table = t186_linear_map;
++		break;
++	case TEGRA_CHIPID_TEGRA23:
++	case TEGRA_CHIPID_TEGRA19:
++		table = t194_linear_map;
++		break;
++	default:
++		return 0;
++	}
++
++	while ((s = table->name) != NULL) {
++		if (!strncmp(s, dev_name(dev), strlen(s))) {
++			*map = table->map;
++			return 1;
++		}
++		table++;
++	}
++	return 0;
++}
++EXPORT_SYMBOL(iommu_get_linear_map);
+diff --git a/drivers/platform/Makefile b/drivers/platform/Makefile
+index 41640172975a..d4455670dca0 100644
+--- a/drivers/platform/Makefile
++++ b/drivers/platform/Makefile
+@@ -11,3 +11,4 @@ obj-$(CONFIG_OLPC_EC)		+= olpc/
+ obj-$(CONFIG_GOLDFISH)		+= goldfish/
+ obj-$(CONFIG_CHROME_PLATFORMS)	+= chrome/
+ obj-$(CONFIG_SURFACE_PLATFORMS)	+= surface/
++obj-$(CONFIG_ARCH_TEGRA) += tegra/
+diff --git a/drivers/platform/tegra/Makefile b/drivers/platform/tegra/Makefile
+new file mode 100644
+index 000000000000..fe124eb5f49a
+--- /dev/null
++++ b/drivers/platform/tegra/Makefile
+@@ -0,0 +1,2 @@
++obj-$(CONFIG_ARCH_TEGRA) += tegra_vpr.o
++obj-$(CONFIG_ARCH_TEGRA) += smc-calls.o
+diff --git a/drivers/platform/tegra/smc-calls.S b/drivers/platform/tegra/smc-calls.S
+new file mode 100644
+index 000000000000..2bc263b3257b
+--- /dev/null
++++ b/drivers/platform/tegra/smc-calls.S
+@@ -0,0 +1,30 @@
++/*
++ * Copyright (c) 2016-2018 NVIDIA Corporation. All rights reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
++ * more details.
++ *
++ */
++
++#include <linux/linkage.h>
++
++/* uint32_t invoke_smc(uint32_t arg0, uintptr_t arg1, uintptr_t arg2); */
++
++#ifdef CONFIG_ARM64
++SYM_FUNC_START(invoke_smc)
++	smc	#0
++	ret
++SYM_FUNC_END(invoke_smc)
++#else
++SYM_FUNC_START(invoke_smc)
++        smc     #0
++        mov     pc, lr
++SYM_FUNC_END(invoke_smc)
++#endif
+diff --git a/drivers/platform/tegra/tegra_vpr.c b/drivers/platform/tegra/tegra_vpr.c
+new file mode 100644
+index 000000000000..3ef7d57d7ddd
+--- /dev/null
++++ b/drivers/platform/tegra/tegra_vpr.c
+@@ -0,0 +1,199 @@
++/*
++ * Copyright (c) 2016-2022 NVIDIA Corporation. All rights reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
++ * more details.
++ *
++ */
++
++#include <linux/platform_device.h>
++#include <linux/dma-mapping.h>
++#include <linux/ote_protocol.h>
++#include <linux/delay.h>
++
++extern phys_addr_t tegra_vpr_start;
++extern phys_addr_t tegra_vpr_size;
++extern bool tegra_vpr_resize;
++static DEFINE_MUTEX(vpr_lock);
++
++/* "Classic" VPR is not supported in virtualized systems. */
++#if !IS_ENABLED(CONFIG_TEGRA_VIRTUALIZATION)
++static int tegra_vpr_arg(char *options)
++{
++	char *p = options;
++
++	tegra_vpr_size = memparse(p, &p);
++	if (*p == '@')
++		tegra_vpr_start = memparse(p+1, &p);
++	pr_info("Found vpr, start=0x%llx size=%llx",
++		(u64)tegra_vpr_start, (u64)tegra_vpr_size);
++	return 0;
++}
++early_param("vpr", tegra_vpr_arg);
++
++static int tegra_vpr_resize_arg(char *options)
++{
++	tegra_vpr_resize = true;
++	return 0;
++}
++early_param("vpr_resize", tegra_vpr_resize_arg);
++#endif
++
++#define NUM_MODULES_IDLE_VPR_RESIZE 3
++static struct vpr_user_module_info {
++	int (*do_idle)(void *);
++	int (*do_unidle)(void *);
++	void *data;
++} vpr_user_module[NUM_MODULES_IDLE_VPR_RESIZE];
++static int _tegra_set_vpr_params(void *vpr_base, size_t vpr_size);
++
++static int tegra_update_resize_cfg(phys_addr_t base , size_t size)
++{
++	int i = 0, err = 0;
++#define MAX_RETRIES 6
++	int retries = MAX_RETRIES;
++	mutex_lock(&vpr_lock);
++retry:
++	for (; i < NUM_MODULES_IDLE_VPR_RESIZE; i++) {
++		if (vpr_user_module[i].do_idle) {
++			err = vpr_user_module[i].do_idle(
++					vpr_user_module[i].data);
++			if (err) {
++				pr_err("%s:%d: %pF failed err:%d\n",
++					 __func__, __LINE__,
++					vpr_user_module[i].do_idle, err);
++				break;
++			}
++		}
++	}
++	if (!err) {
++		/* Config VPR_BOM/_SIZE in MC */
++		err = _tegra_set_vpr_params((void *)(uintptr_t)base, size);
++		if (err)
++			pr_err("vpr resize to (%p, %zu) failed. err=%d\n",
++				(void *)(uintptr_t)base, size, err);
++		else
++			retries = 0; /* finish */
++	}
++	if (retries--) {
++		pr_err("%s:%d: fail retry=%d",
++			__func__, __LINE__, MAX_RETRIES - retries);
++		msleep(1);
++		goto retry;
++	}
++	while (--i >= 0) {
++		if (!vpr_user_module[i].do_unidle)
++			continue;
++
++		err = vpr_user_module[i].do_unidle(
++				vpr_user_module[i].data);
++		if (!err)
++			continue;
++		pr_err("%s:%d: %pF failed err:%d. Could be fatal!!\n",
++			 __func__, __LINE__,
++			vpr_user_module[i].do_unidle, err);
++		/* vpr resize is success, so return 0 on unidle failure */
++		err = 0;
++	}
++	mutex_unlock(&vpr_lock);
++	return err;
++}
++
++struct dma_resize_notifier_ops vpr_dev_ops = {
++	.resize = tegra_update_resize_cfg
++};
++EXPORT_SYMBOL(vpr_dev_ops);
++
++bool tegra_is_vpr_resize_supported(void)
++{
++	return tegra_vpr_resize;
++}
++EXPORT_SYMBOL(tegra_is_vpr_resize_supported);
++
++/* SMC Definitions*/
++#define TE_SMC_PROGRAM_VPR 0x82000003
++
++uint32_t invoke_smc(uint32_t arg0, uintptr_t arg1, uintptr_t arg2);
++
++static int _tegra_set_vpr_params(void *vpr_base, size_t vpr_size)
++{
++	int retval = -EINVAL;
++
++	retval = invoke_smc(TE_SMC_PROGRAM_VPR,
++				(uintptr_t)vpr_base, vpr_size);
++
++	if (retval != 0) {
++		pr_err("%s: smc failed, base 0x%p size %zx, err (0x%x)\n",
++			__func__, vpr_base, vpr_size, retval);
++		return -EINVAL;
++	}
++	return 0;
++}
++
++int tegra_set_vpr_params(void *vpr_base, size_t vpr_size)
++{
++	int ret;
++
++	mutex_lock(&vpr_lock);
++	ret = _tegra_set_vpr_params(vpr_base, vpr_size);
++	mutex_unlock(&vpr_lock);
++	return ret;
++}
++EXPORT_SYMBOL(tegra_set_vpr_params);
++
++void tegra_register_idle_unidle(int (*do_idle)(void *),
++				int (*do_unidle)(void *),
++				void *data)
++{
++	int i;
++
++	mutex_lock(&vpr_lock);
++	for (i = 0; i < NUM_MODULES_IDLE_VPR_RESIZE; i++) {
++		if (do_idle == vpr_user_module[i].do_idle) {
++			vpr_user_module[i].data = data;
++			goto unlock;
++		}
++	}
++
++	for (i = 0; i < NUM_MODULES_IDLE_VPR_RESIZE; i++) {
++		if (!vpr_user_module[i].do_idle) {
++			vpr_user_module[i].do_idle = do_idle;
++			vpr_user_module[i].do_unidle = do_unidle;
++			vpr_user_module[i].data = data;
++			break;
++		}
++	}
++unlock:
++	mutex_unlock(&vpr_lock);
++
++	if (i != NUM_MODULES_IDLE_VPR_RESIZE)
++		return;
++
++	pr_err("%pF,%pF failed to register to be called before vpr resize!!\n",
++		do_idle, do_unidle);
++}
++EXPORT_SYMBOL(tegra_register_idle_unidle);
++
++void tegra_unregister_idle_unidle(int (*do_idle)(void *))
++{
++	int i;
++
++	mutex_lock(&vpr_lock);
++	for (i = 0; i < NUM_MODULES_IDLE_VPR_RESIZE; i++) {
++		if (vpr_user_module[i].do_idle == do_idle) {
++			vpr_user_module[i].do_idle = NULL;
++			vpr_user_module[i].do_unidle = NULL;
++			vpr_user_module[i].data = NULL;
++			break;
++		}
++	}
++	mutex_unlock(&vpr_lock);
++}
++EXPORT_SYMBOL(tegra_unregister_idle_unidle);
+diff --git a/drivers/soc/tegra/fuse/tegra-apbmisc.c b/drivers/soc/tegra/fuse/tegra-apbmisc.c
+index 8229013a4e84..92e61b908443 100644
+--- a/drivers/soc/tegra/fuse/tegra-apbmisc.c
++++ b/drivers/soc/tegra/fuse/tegra-apbmisc.c
+@@ -14,6 +14,19 @@
+ 
+ #include "fuse.h"
+ 
++#define TEGRAID_CHIPID_MASK 0xFF00
++#define TEGRAID_CHIPID_SHIFT 8
++#define TEGRAID_MAJOR_MASK 0xF0
++#define TEGRAID_MAJOR_SHIFT 4
++#define TEGRAID_MINOR_MASK 0xF0000
++#define TEGRAID_MINOR_SHIFT 16
++#define TEGRAID_NETLIST_MASK 0xFF
++#define TEGRAID_PATCH_MASK 0xFF00
++#define TEGRAID_PATCH_SHIFT 8
++#define TEGRA210_INT_CID 5
++#define TEGRA186_INT_CID 6
++#define TEGRA194_INT_CID 7
++
+ #define FUSE_SKU_INFO	0x10
+ 
+ #define ERD_ERR_CONFIG 0x120c
+@@ -30,6 +43,81 @@ static bool long_ram_code;
+ static u32 strapping;
+ static u32 chipid;
+ 
++struct tegra_id {
++	enum tegra_chipid chipid;
++	enum tegra_revision revision;
++	unsigned int major;
++	unsigned int minor;
++	unsigned int netlist;
++	unsigned int patch;
++	char *priv;
++};
++
++static struct tegra_id tegra_id;
++
++struct apbmisc_data {
++	u32 emu_revid_offset;
++};
++
++static const struct apbmisc_data *apbmisc_data;
++
++void tegra_set_tegraid_from_hw(void)
++{
++	u32 cid;
++	u32 emu_id;
++
++	cid = tegra_read_chipid();
++	emu_id = tegra_read_emu_revid();
++
++	tegra_id.chipid  = (cid & TEGRAID_CHIPID_MASK) >> TEGRAID_CHIPID_SHIFT;
++	tegra_id.major = (cid & TEGRAID_MAJOR_MASK) >> TEGRAID_MAJOR_SHIFT;
++	tegra_id.minor   = (cid & TEGRAID_MINOR_MASK) >> TEGRAID_MINOR_SHIFT;
++	tegra_id.netlist = emu_id & TEGRAID_NETLIST_MASK;
++	tegra_id.patch   = (emu_id & TEGRAID_PATCH_MASK) >> TEGRAID_PATCH_SHIFT;
++	tegra_id.revision = tegra_sku_info.revision;
++}
++
++static int get_chip_id(char *val, const struct kernel_param *kp)
++{
++	if (tegra_id.chipid == TEGRA_CHIPID_UNKNOWN)
++		tegra_set_tegraid_from_hw();
++
++	return param_get_uint(val, kp);
++}
++
++static int get_revision(char *val, const struct kernel_param *kp)
++{
++	if (tegra_id.revision == TEGRA_REVISION_UNKNOWN)
++		tegra_set_tegraid_from_hw();
++
++	return param_get_uint(val, kp);
++}
++
++static int get_major_rev(char *val, const struct kernel_param *kp)
++{
++	if (tegra_id.revision == TEGRA_REVISION_UNKNOWN)
++		tegra_set_tegraid_from_hw();
++
++	return param_get_uint(val, kp);
++}
++
++static struct kernel_param_ops tegra_chip_id_ops = {
++	.get = get_chip_id,
++};
++
++static struct kernel_param_ops tegra_revision_ops = {
++	.get = get_revision,
++};
++
++static struct kernel_param_ops tegra_major_rev_ops = {
++	.get = get_major_rev,
++};
++
++module_param_cb(tegra_chip_id, &tegra_chip_id_ops, &tegra_id.chipid, 0444);
++module_param_cb(tegra_chip_rev, &tegra_revision_ops, &tegra_id.revision, 0444);
++module_param_cb(tegra_chip_major_rev,
++		&tegra_major_rev_ops, &tegra_id.major, 0444);
++
+ u32 tegra_read_chipid(void)
+ {
+ 	WARN(!chipid, "Tegra APB MISC not yet available\n");
+@@ -41,6 +129,16 @@ u8 tegra_get_chip_id(void)
+ {
+ 	return (tegra_read_chipid() >> 8) & 0xff;
+ }
++EXPORT_SYMBOL(tegra_get_chip_id);
++
++enum tegra_chipid tegra_get_chipid(void)
++{
++	if (tegra_id.chipid == TEGRA_CHIPID_UNKNOWN)
++		tegra_set_tegraid_from_hw();
++
++	return tegra_id.chipid;
++}
++EXPORT_SYMBOL(tegra_get_chipid);
+ 
+ u8 tegra_get_major_rev(void)
+ {
+@@ -78,6 +176,19 @@ bool tegra_is_silicon(void)
+ 	return true;
+ }
+ 
++u32 tegra_read_emu_revid(void)
++{
++	if (!apbmisc_base)
++		tegra_init_apbmisc();
++
++	if (!apbmisc_base) {
++		WARN(1, "Tegra Chip ID not yet available\n");
++		return 0;
++	}
++
++	return readl_relaxed(apbmisc_base + apbmisc_data->emu_revid_offset);
++}
++
+ enum tegra_revision tegra_chip_get_revision(void)
+ {
+ 	return tegra_sku_info.id_and_rev;
+@@ -201,8 +312,9 @@ void __init tegra_init_apbmisc(void)
+ 	void __iomem *strapping_base;
+ 	struct resource apbmisc, straps;
+ 	struct device_node *np;
++	const struct of_device_id *match;
+ 
+-	np = of_find_matching_node(NULL, apbmisc_match);
++	np = of_find_matching_node_and_match(NULL, apbmisc_match, &match);
+ 	if (!np) {
+ 		/*
+ 		 * Fall back to legacy initialization for 32-bit ARM only. All
+@@ -253,6 +365,7 @@ void __init tegra_init_apbmisc(void)
+ 			pr_err("failed to get strapping options registers\n");
+ 			goto put;
+ 		}
++		apbmisc_data = match->data;
+ 	}
+ 
+ 	apbmisc_base = ioremap(apbmisc.start, resource_size(&apbmisc));
+diff --git a/include/dt-bindings/memory/tegra-swgroup.h b/include/dt-bindings/memory/tegra-swgroup.h
+new file mode 100644
+index 000000000000..c74e318d8f28
+--- /dev/null
++++ b/include/dt-bindings/memory/tegra-swgroup.h
+@@ -0,0 +1,252 @@
++/*
++ * This header provides constants for binding nvidia,swgroup ID
++ *
++ * Copyright (c) 2014-2017, NVIDIA CORPORATION, All rights reserved.
++ *
++ * This software is licensed under the terms of the GNU General Public
++ * License version 2, as published by the Free Software Foundation, and
++ * may be copied, distributed, and modified under those terms.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++ * GNU General Public License for more details.
++ */
++
++#ifndef _DT_BINDINGS_MEMORY_TEGRA_SWGROUP_H
++#define _DT_BINDINGS_MEMORY_TEGRA_SWGROUP_H
++
++#define TEGRA_SWGROUP_INVALID	0xff	/* 0x238 */
++#define TEGRA_SWGROUP_AFI	0	/* 0x238 */
++#define TEGRA_SWGROUP_AVPC	1	/* 0x23c */
++#define TEGRA_SWGROUP_DC	2	/* 0x240 */
++#define TEGRA_SWGROUP_DCB	3	/* 0x244 */
++#define TEGRA_SWGROUP_EPP	4	/* 0x248 */
++#define TEGRA_SWGROUP_G2	5	/* 0x24c */
++#define TEGRA_SWGROUP_HC	6	/* 0x250 */
++#define TEGRA_SWGROUP_HDA	7	/* 0x254 */
++#define TEGRA_SWGROUP_ISP	8	/* 0x258 */
++#define TEGRA_SWGROUP_ISP2	8
++#define TEGRA_SWGROUP_DC14	9	/* 0x490 *//* Exceptional non-linear */
++#define TEGRA_SWGROUP_DC12	10	/* 0xa88 *//* Exceptional non-linear */
++#define TEGRA_SWGROUP_MPE	11	/* 0x264 */
++#define TEGRA_SWGROUP_MSENC	11
++#define TEGRA_SWGROUP_NVENC	11
++#define TEGRA_SWGROUP_NV	12	/* 0x268 */
++#define TEGRA_SWGROUP_NV2	13	/* 0x26c */
++#define TEGRA_SWGROUP_PPCS	14	/* 0x270 */
++#define TEGRA_SWGROUP_SATA2	15	/* 0x274 */
++#define TEGRA_SWGROUP_SATA	16	/* 0x278 */
++#define TEGRA_SWGROUP_VDE	17	/* 0x27c */
++#define TEGRA_SWGROUP_VI	18	/* 0x280 */
++#define TEGRA_SWGROUP_VII2C	18	/* 0x280 */
++#define TEGRA_SWGROUP_VIC	19	/* 0x284 */
++#define TEGRA_SWGROUP_XUSB_HOST	20	/* 0x288 */
++#define TEGRA_SWGROUP_XUSB_DEV	21	/* 0x28c */
++#define TEGRA_SWGROUP_A9AVP	22	/* 0x290 */
++#define TEGRA_SWGROUP_TSEC	23	/* 0x294 */
++#define TEGRA_SWGROUP_PPCS1	24	/* 0x298 */
++#define TEGRA_SWGROUP_SDMMC1A	25	/* 0xa94 *//* Linear shift again */
++#define TEGRA_SWGROUP_SDMMC2A	26	/* 0xa98 */
++#define TEGRA_SWGROUP_SDMMC3A	27	/* 0xa9c */
++#define TEGRA_SWGROUP_SDMMC4A	28	/* 0xaa0 */
++#define TEGRA_SWGROUP_ISP2B	29	/* 0xaa4 */
++#define TEGRA_SWGROUP_GPU	30	/* 0xaa8, DO NOT USE THIS */
++#define TEGRA_SWGROUP_GPUB	31	/* 0xaac */
++#define TEGRA_SWGROUP_PPCS2	32	/* 0xab0 */
++#define TEGRA_SWGROUP_NVDEC	33	/* 0xab4 */
++#define TEGRA_SWGROUP_APE	34	/* 0xab8 */
++#define TEGRA_SWGROUP_SE	35	/* 0xabc */
++#define TEGRA_SWGROUP_NVJPG	36	/* 0xac0 */
++#define TEGRA_SWGROUP_HC1	37	/* 0xac4 */
++#define TEGRA_SWGROUP_SE1	38	/* 0xac8 */
++#define TEGRA_SWGROUP_AXIAP	39	/* 0xacc */
++#define TEGRA_SWGROUP_ETR	40	/* 0xad0 */
++#define TEGRA_SWGROUP_TSECB	41	/* 0xad4 */
++#define TEGRA_SWGROUP_TSEC1	42	/* 0xad8 */
++#define TEGRA_SWGROUP_TSECB1	43	/* 0xadc */
++#define TEGRA_SWGROUP_NVDEC1	44	/* 0xae0 */
++/*	Reserved		45 */
++#define TEGRA_SWGROUP_AXIS	46	/* 0xae8 */
++#define TEGRA_SWGROUP_EQOS	47	/* 0xaec */
++#define TEGRA_SWGROUP_UFSHC	48	/* 0xaf0 */
++#define TEGRA_SWGROUP_NVDISPLAY	49	/* 0xaf4 */
++#define TEGRA_SWGROUP_BPMP	50	/* 0xaf8 */
++#define TEGRA_SWGROUP_AON	51	/* 0xafc */
++#define TEGRA_SWGROUP_SMMU_TEST	52
++/*	Reserved		50 */
++
++#define TWO_U32_OF_U64(x)	((x) & 0xffffffff) ((x) >> 32)
++#define TEGRA_SWGROUP_BIT(x)	(1ULL << TEGRA_SWGROUP_##x)
++#define TEGRA_SWGROUP_CELLS(x)	TWO_U32_OF_U64(TEGRA_SWGROUP_BIT(x))
++
++#define TEGRA_SWGROUP_CELLS2(x1, x2)	 \
++				TWO_U32_OF_U64( TEGRA_SWGROUP_BIT(x1) | \
++						TEGRA_SWGROUP_BIT(x2))
++#define TEGRA_SWGROUP_CELLS3(x1, x2, x3)	 \
++				TWO_U32_OF_U64( TEGRA_SWGROUP_BIT(x1) | \
++						TEGRA_SWGROUP_BIT(x2) | \
++						TEGRA_SWGROUP_BIT(x3))
++#define TEGRA_SWGROUP_CELLS4(x1, x2, x3, x4)	 \
++				TWO_U32_OF_U64( TEGRA_SWGROUP_BIT(x1) | \
++						TEGRA_SWGROUP_BIT(x2) | \
++						TEGRA_SWGROUP_BIT(x3) | \
++						TEGRA_SWGROUP_BIT(x4))
++#define TEGRA_SWGROUP_CELLS5(x1, x2, x3, x4, x5)	\
++				TWO_U32_OF_U64( TEGRA_SWGROUP_BIT(x1) | \
++						TEGRA_SWGROUP_BIT(x2) | \
++						TEGRA_SWGROUP_BIT(x3) | \
++						TEGRA_SWGROUP_BIT(x4) | \
++						TEGRA_SWGROUP_BIT(x5))
++#define TEGRA_SWGROUP_CELLS9(x1, x2, x3, x4, x5, x6, x7, x8, x9) \
++				TWO_U32_OF_U64( TEGRA_SWGROUP_BIT(x1) | \
++						TEGRA_SWGROUP_BIT(x2) | \
++						TEGRA_SWGROUP_BIT(x3) | \
++						TEGRA_SWGROUP_BIT(x4) | \
++						TEGRA_SWGROUP_BIT(x5) | \
++						TEGRA_SWGROUP_BIT(x6) | \
++						TEGRA_SWGROUP_BIT(x7) | \
++						TEGRA_SWGROUP_BIT(x8) | \
++						TEGRA_SWGROUP_BIT(x9))
++#define TEGRA_SWGROUP_CELLS12(x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12) \
++				TWO_U32_OF_U64( TEGRA_SWGROUP_BIT(x1) | \
++						TEGRA_SWGROUP_BIT(x2) | \
++						TEGRA_SWGROUP_BIT(x3) | \
++						TEGRA_SWGROUP_BIT(x4) | \
++						TEGRA_SWGROUP_BIT(x5) | \
++						TEGRA_SWGROUP_BIT(x6) | \
++						TEGRA_SWGROUP_BIT(x7) | \
++						TEGRA_SWGROUP_BIT(x8) | \
++						TEGRA_SWGROUP_BIT(x9) | \
++						TEGRA_SWGROUP_BIT(x10)| \
++						TEGRA_SWGROUP_BIT(x11)| \
++						TEGRA_SWGROUP_BIT(x12))
++#define TEGRA_SWGROUP_MAX	64
++
++#define SWGIDS_ERROR_CODE	(~0ULL)
++#define swgids_is_error(x)	((x) == SWGIDS_ERROR_CODE)
++
++/*
++ * The above definitions are for the older tegra chips using the Tegra SMMU. For
++ * tegra chips using the ARM SMMU the following is used. The notion of bit maps
++ * is removed since they are not very scalable.
++ */
++
++/* Host clients. */
++#define TEGRA_SID_HC		0x1	/* 1 */
++#define TEGRA_SID_VIC		0x3	/* 3 */
++#define TEGRA_SID_VI		0x4	/* 4 */
++#define TEGRA_SID_ISP		0x5	/* 5 */
++#define TEGRA_SID_NVDEC		0x6	/* 6 */
++#define TEGRA_SID_NVENC		0x7	/* 7 */
++#define TEGRA_SID_NVJPG		0x8	/* 8 */
++#define TEGRA_SID_NVDISPLAY	0x9	/* 9 */
++#define TEGRA_SID_TSEC		0xa	/* 10 */
++#define TEGRA_SID_TSECB		0xb	/* 11 */
++#define TEGRA_SID_SE		0xc	/* 12 */
++#define TEGRA_SID_SE1		0xd	/* 13 */
++
++/* GPU clients. */
++#define TEGRA_SID_GPUB		0x10	/* 16 */
++
++/* Other SoC clients */
++#define TEGRA_SID_AFI		0x11	/* 17 */
++#define TEGRA_SID_HDA		0x12	/* 18 */
++#define TEGRA_SID_ETR		0x13	/* 19 */
++#define TEGRA_SID_EQOS		0x14	/* 20 */
++#define TEGRA_SID_UFSHC		0x15	/* 21 */
++#define TEGRA_SID_AON		0x16	/* 22 */
++#define TEGRA_SID_SDMMC4A	0x17	/* 23 */
++#define TEGRA_SID_SDMMC3A	0x18	/* 24 */
++#define TEGRA_SID_SDMMC2A	0x19	/* 25 */
++#define TEGRA_SID_SDMMC1A	0x1a	/* 26 */
++#define TEGRA_SID_XUSB_HOST	0x1b	/* 27 */
++#define TEGRA_SID_XUSB_DEV	0x1c	/* 28 */
++#define TEGRA_SID_SATA2		0x1d	/* 29 */
++#define TEGRA_SID_APE		0x1e	/* 30 */
++
++/*
++ * The BPMP has hard coded their SID value in their FW which is not built
++ * in the normal Linux tree. As a result, changing the SID requires a
++ * considerable amount of work.
++ */
++#define TEGRA_SID_BPMP		0x32	/* 50 */
++
++/* For smmu tests */
++#define TEGRA_SID_SMMU_TEST	0x33	/* 51 */
++
++/*
++ * This is the t18x specific component of the new SID dt-binding.
++ */
++#define TEGRA_SID_NVCSI		0x2	/* 2 */
++#define TEGRA_SID_SE2		0xe	/* 14 */
++#define TEGRA_SID_SE3		0xf	/* 15 */
++#define TEGRA_SID_SCE		0x1f	/* 31 */
++
++/* The GPC DMA clients. */
++#define TEGRA_SID_GPCDMA_0	0x20	/* 32 */
++#define TEGRA_SID_GPCDMA_1	0x21	/* 33 */
++#define TEGRA_SID_GPCDMA_2	0x22	/* 34 */
++#define TEGRA_SID_GPCDMA_3	0x23	/* 35 */
++#define TEGRA_SID_GPCDMA_4	0x24	/* 36 */
++#define TEGRA_SID_GPCDMA_5	0x25	/* 37 */
++#define TEGRA_SID_GPCDMA_6	0x26	/* 38 */
++#define TEGRA_SID_GPCDMA_7	0x27	/* 39 */
++
++/* The APE DMA Clients. */
++#define TEGRA_SID_APE_1		0x28	/* 40 */
++#define TEGRA_SID_APE_2		0x29	/* 41 */
++
++/* The Camera RTCPU running on SCE. */
++#define TEGRA_SID_SCE_CAM	0x2a	/* 42 */
++#define TEGRA_SID_SCE_CAM_1X	0x2b	/* 43 */
++
++/* The APE DMA Clients. */
++#define TEGRA_SID_APE_3		0x2c	/* 44 */
++
++/* The Camera RTCPU running on APE */
++#define TEGRA_SID_APE_CAM	0x2d	/* 45 */
++#define TEGRA_SID_APE_CAM_1X	0x2e	/* 46 */
++
++/* Host1x virtualization clients. */
++#define TEGRA_SID_HOST1X_CTX0	0x38	/* 56 */
++#define TEGRA_SID_HOST1X_CTX1	0x39	/* 57 */
++#define TEGRA_SID_HOST1X_CTX2	0x3a	/* 58 */
++#define TEGRA_SID_HOST1X_CTX3	0x3b	/* 59 */
++#define TEGRA_SID_HOST1X_CTX4	0x3c	/* 60 */
++#define TEGRA_SID_HOST1X_CTX5	0x3d	/* 61 */
++#define TEGRA_SID_HOST1X_CTX6	0x3e	/* 62 */
++#define TEGRA_SID_HOST1X_CTX7	0x3f	/* 63 */
++
++/* Host1x command buffers */
++#define TEGRA_SID_HC_VM0	0x40
++#define TEGRA_SID_HC_VM1	0x41
++#define TEGRA_SID_HC_VM2	0x42
++#define TEGRA_SID_HC_VM3	0x43
++#define TEGRA_SID_HC_VM4	0x44
++#define TEGRA_SID_HC_VM5	0x45
++#define TEGRA_SID_HC_VM6	0x46
++#define TEGRA_SID_HC_VM7	0x47
++
++/* SE data buffers */
++#define TEGRA_SID_SE_VM0	0x48
++#define TEGRA_SID_SE_VM1	0x49
++#define TEGRA_SID_SE_VM2	0x4a
++#define TEGRA_SID_SE_VM3	0x4b
++#define TEGRA_SID_SE_VM4	0x4c
++#define TEGRA_SID_SE_VM5	0x4d
++#define TEGRA_SID_SE_VM6	0x4e
++#define TEGRA_SID_SE_VM7	0x4f
++
++/* Special clients */
++#define TEGRA_SID_PASSTHROUGH	0x7f
++#define TEGRA_SID_INVALID	0x0
++
++/*
++ * These macros will be removed once the bitmap problem is sorted out. Until
++ * then this is equivalent to TEGRA_SWGROUP_CELLS() only with TEGRA_SID_*
++ * instead of TEGRA_SWGROUP_*.
++ */
++#define TEGRA_SID(x) 		(TEGRA_SID_ ## x)
++
++#endif /* _DT_BINDINGS_MEMORY_TEGRA_SWGROUP_H */
+diff --git a/include/linux/dma-mapping.h b/include/linux/dma-mapping.h
+index f0ccca16a0ac..d0451dfde38d 100644
+--- a/include/linux/dma-mapping.h
++++ b/include/linux/dma-mapping.h
+@@ -92,6 +92,15 @@ static inline void debug_dma_map_single(struct device *dev, const void *addr,
+ #endif /* CONFIG_DMA_API_DEBUG */
+ 
+ #ifdef CONFIG_HAS_DMA
++
++struct dma_resize_notifier_ops {
++	int (*resize)(phys_addr_t, size_t);
++};
++
++struct dma_resize_notifier {
++	struct dma_resize_notifier_ops *ops;
++};
++
+ static inline int dma_mapping_error(struct device *dev, dma_addr_t dma_addr)
+ {
+ 	debug_dma_mapping_error(dev, dma_addr);
+diff --git a/include/linux/iommu.h b/include/linux/iommu.h
+index b6ef263e85c0..5aeda9a3a950 100644
+--- a/include/linux/iommu.h
++++ b/include/linux/iommu.h
+@@ -50,6 +50,17 @@ typedef int (*iommu_fault_handler_t)(struct iommu_domain *,
+ 			struct device *, unsigned long, int, void *);
+ typedef int (*iommu_dev_fault_handler_t)(struct iommu_fault *, void *);
+ 
++struct iommu_linear_map {
++	dma_addr_t start;
++	size_t size;
++	bool is_mapped;
++};
++
++int iommu_get_linear_map(struct device *dev,
++			struct iommu_linear_map **map);
++
++void tegra_fb_linear_set(struct iommu_linear_map *map);
++
+ struct iommu_domain_geometry {
+ 	dma_addr_t aperture_start; /* First address that can be mapped    */
+ 	dma_addr_t aperture_end;   /* Last address that can be mapped     */
+diff --git a/include/linux/ote_protocol.h b/include/linux/ote_protocol.h
+new file mode 100644
+index 000000000000..ef71ac97810e
+--- /dev/null
++++ b/include/linux/ote_protocol.h
+@@ -0,0 +1,29 @@
++/*
++ * Copyright (c) 2013-2018 NVIDIA Corporation. All rights reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
++ * more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
++ */
++
++#ifndef __OTE_PROTOCOL_H__
++#define __OTE_PROTOCOL_H__
++
++int tegra_set_vpr_params(void *vpr_base, size_t vpr_size);
++
++void trusty_restore_keyslots(void);
++void tlk_restore_keyslots(void);
++
++int te_is_secos_dev_enabled(void);
++
++#endif
+diff --git a/include/linux/platform/tegra/common.h b/include/linux/platform/tegra/common.h
+new file mode 100644
+index 000000000000..6c46a5234f7e
+--- /dev/null
++++ b/include/linux/platform/tegra/common.h
+@@ -0,0 +1,63 @@
++/*
++ * Copyright (C) 2011-2019, NVIDIA Corporation. All rights reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms and conditions of the GNU General Public License,
++ * version 2, as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
++ * more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++#ifndef __MACH_TEGRA_COMMON_H
++#define __MACH_TEGRA_COMMON_H
++
++extern struct smp_operations tegra_smp_ops;
++
++extern phys_addr_t tegra_tsec_start;
++extern phys_addr_t tegra_tsec_size;
++
++#ifdef CONFIG_CACHE_L2X0
++void tegra_init_cache(bool init);
++#else
++static inline void tegra_init_cache(bool init) {}
++#endif
++
++extern void tegra_cpu_die(unsigned int cpu);
++extern int tegra_cpu_kill(unsigned int cpu);
++extern phys_addr_t tegra_avp_kernel_start;
++extern phys_addr_t tegra_avp_kernel_size;
++void ahb_gizmo_writel(unsigned long val, void __iomem *reg);
++
++extern struct device tegra_generic_cma_dev;
++extern struct device tegra_vpr_cma_dev;
++extern int tegra_with_secure_firmware;
++
++extern struct device tegra_generic_dev;
++extern struct device tegra_vpr_dev;
++extern struct device tegra_iram_dev;
++extern struct dma_resize_notifier_ops vpr_dev_ops;
++
++u32 tegra_get_bct_strapping(void);
++u32 tegra_get_fuse_opt_subrevision(void);
++enum tegra_revision tegra_chip_get_revision(void);
++void __init display_tegra_dt_info(void);
++
++bool tegra_is_vpr_resize_supported(void);
++void tegra_register_idle_unidle(int (*do_idle)(void *),
++				int (*do_unidle)(void *),
++				void *data);
++void tegra_unregister_idle_unidle(int (*do_idle)(void *));
++
++static inline int tegra_cpu_is_secure(void)
++{
++	return tegra_with_secure_firmware;
++}
++
++int tegra_state_idx_from_name(char *state_name);
++#endif
+diff --git a/include/soc/tegra/fuse.h b/include/soc/tegra/fuse.h
+index fe1761a9f4cd..64834fac9b24 100644
+--- a/include/soc/tegra/fuse.h
++++ b/include/soc/tegra/fuse.h
+@@ -126,9 +126,11 @@ u32 tegra_read_ram_code(void);
+ int tegra_fuse_readl(unsigned long offset, u32 *value);
+ u32 tegra_read_chipid(void);
+ u8 tegra_get_chip_id(void);
++enum tegra_chipid tegra_get_chipid(void);
+ u8 tegra_get_platform(void);
+ bool tegra_is_silicon(void);
+ int tegra194_miscreg_mask_serror(void);
++extern u32 tegra_read_emu_revid(void);
+ #else
+ static struct tegra_sku_info tegra_sku_info __maybe_unused;
+ 
+diff --git a/include/soc/tegra/memory-carveout.h b/include/soc/tegra/memory-carveout.h
+new file mode 100644
+index 000000000000..556dbe9c9e03
+--- /dev/null
++++ b/include/soc/tegra/memory-carveout.h
+@@ -0,0 +1,26 @@
++/*
++ * Copyright (c) 2016, NVIDIA Corporation. All rights reserved.
++ *
++ * This software is licensed under the terms of the GNU General Public
++ * License version 2, as published by the Free Software Foundation, and
++ * may be copied, distributed, and modified under those terms.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ */
++
++#ifndef __SOC_TEGRA_MEMORY_CARVEOUT_H__
++#define __SOC_TEGRA_MEMORY_CARVEOUT_H__
++
++#include <linux/types.h>
++
++extern phys_addr_t tegra_carveout_start;
++extern phys_addr_t tegra_carveout_size;
++extern phys_addr_t tegra_vpr_start;
++extern phys_addr_t tegra_vpr_size;
++extern bool tegra_vpr_resize;
++
++#endif /* __SOC_TEGRA_MEMORY_CARVEOUT_H__ */
+-- 
+2.34.1
+

@@ -1,14 +1,17 @@
-From 819347e4847531c95ce0c975953f9d111a9d69f5 Mon Sep 17 00:00:00 2001
+From f51a8a655a87a44f4ece34705f1ab627caecda69 Mon Sep 17 00:00:00 2001
 From: Thomas Epperson <thomas.epperson@gmail.com>
 Date: Sun, 15 Sep 2024 09:05:22 -0500
 Subject: [PATCH] Nvmap part 2
 
 ---
+ arch/arm64/include/asm/device.h          |   7 +
+ arch/arm64/include/asm/dma-iommu.h       |  11 +
+ arch/arm64/mm/dma-mapping.c              |  25 ++
  drivers/iommu/tegra-iommu.c              |   1 +
  drivers/video/tegra/nvmap/nvmap_alloc.c  |   6 +-
  drivers/video/tegra/nvmap/nvmap_cache.c  |  17 +-
  drivers/video/tegra/nvmap/nvmap_dev.c    |  23 +-
- drivers/video/tegra/nvmap/nvmap_dmabuf.c |  41 ++-
+ drivers/video/tegra/nvmap/nvmap_dmabuf.c |  42 ++-
  drivers/video/tegra/nvmap/nvmap_fault.c  |  23 +-
  drivers/video/tegra/nvmap/nvmap_heap.c   |   7 +-
  drivers/video/tegra/nvmap/nvmap_init.c   |  10 +-
@@ -22,12 +25,93 @@ Subject: [PATCH] Nvmap part 2
  include/linux/dma-map-ops.h              |  14 +
  include/linux/dma-mapping.h              |  27 ++
  include/linux/tegra-ivc.h                | 436 +++++++++++++++++++++++
- 18 files changed, 835 insertions(+), 74 deletions(-)
+ 21 files changed, 879 insertions(+), 74 deletions(-)
  create mode 100644 include/asm-generic/dma-coherent.h
  create mode 100644 include/linux/dma-attrs.h
  create mode 100755 include/linux/dma-contiguous.h
  create mode 100644 include/linux/tegra-ivc.h
 
+diff --git a/arch/arm64/include/asm/device.h b/arch/arm64/include/asm/device.h
+index 996498751318..85adbb58e133 100644
+--- a/arch/arm64/include/asm/device.h
++++ b/arch/arm64/include/asm/device.h
+@@ -6,6 +6,13 @@
+ #define __ASM_DEVICE_H
+ 
+ struct dev_archdata {
++	struct dma_map_ops *dma_ops;
++#ifdef CONFIG_IOMMU_API
++	void *iommu;			/* private IOMMU data */
++	struct dma_iommu_mapping *mapping;
++#endif
++	bool dma_coherent;
++	bool dma_noncontig;
+ };
+ 
+ struct pdev_archdata {
+diff --git a/arch/arm64/include/asm/dma-iommu.h b/arch/arm64/include/asm/dma-iommu.h
+index c4fc0a7710a4..7ec955d234b1 100644
+--- a/arch/arm64/include/asm/dma-iommu.h
++++ b/arch/arm64/include/asm/dma-iommu.h
+@@ -9,6 +9,17 @@
+ #include <linux/kref.h>
+ #include <linux/iova.h>
+ 
++#define CONFIG_ARM_DMA_USE_IOMMU
++
++#ifdef CONFIG_ARM_DMA_USE_IOMMU
++extern bool device_is_iommuable(struct device *dev);
++#else
++static inline bool device_is_iommuable(struct device *dev)
++{
++	return false;
++}
++#endif
++
+ struct dma_iommu_mapping {
+ 	/* iommu specific data */
+ 	struct iommu_domain	*domain;
+diff --git a/arch/arm64/mm/dma-mapping.c b/arch/arm64/mm/dma-mapping.c
+index 3cb101e8cb29..efd4a7a4f26b 100644
+--- a/arch/arm64/mm/dma-mapping.c
++++ b/arch/arm64/mm/dma-mapping.c
+@@ -39,11 +39,36 @@ void arch_dma_prep_coherent(struct page *page, size_t size)
+ 	dcache_clean_poc(start, start + size);
+ }
+ 
++static struct dma_map_ops iommu_dma_ops = {
++	.alloc = __iommu_alloc_attrs,
++	.free = __iommu_free_attrs,
++	.mmap = __iommu_mmap_attrs,
++	.get_sgtable = __iommu_get_sgtable,
++	.map_page = __iommu_map_page,
++	.unmap_page = __iommu_unmap_page,
++	.map_sg = __iommu_map_sg_attrs,
++	.unmap_sg = __iommu_unmap_sg_attrs,
++	.sync_single_for_cpu = __iommu_sync_single_for_cpu,
++	.sync_single_for_device = __iommu_sync_single_for_device,
++	.sync_sg_for_cpu = __iommu_sync_sg_for_cpu,
++	.sync_sg_for_device = __iommu_sync_sg_for_device,
++	.dma_supported = iommu_dma_supported,
++	.mapping_error = iommu_dma_mapping_error,
++
++	.map_at = arm_iommu_map_at,
++};
++
+ #ifdef CONFIG_IOMMU_DMA
+ void arch_teardown_dma_ops(struct device *dev)
+ {
+ 	dev->dma_ops = NULL;
+ }
++
++bool device_is_iommuable(struct device *dev)
++{
++	return (dev->archdata.dma_ops == &iommu_dma_ops);
++}
++EXPORT_SYMBOL(device_is_iommuable);
+ #endif
+ 
+ void arch_setup_dma_ops(struct device *dev, u64 dma_base, u64 size,
 diff --git a/drivers/iommu/tegra-iommu.c b/drivers/iommu/tegra-iommu.c
 index f77aac2bd3af..407b2ee660d8 100644
 --- a/drivers/iommu/tegra-iommu.c
@@ -209,10 +293,16 @@ index eb579146485f..30b94773da19 100644
  	*pss = (mss.pss >> PSS_SHIFT);
  	nvmap_ref_unlock(client);
 diff --git a/drivers/video/tegra/nvmap/nvmap_dmabuf.c b/drivers/video/tegra/nvmap/nvmap_dmabuf.c
-index 951191bd85fc..5e115937faa7 100644
+index 951191bd85fc..a6577cf224ac 100644
 --- a/drivers/video/tegra/nvmap/nvmap_dmabuf.c
 +++ b/drivers/video/tegra/nvmap/nvmap_dmabuf.c
-@@ -20,6 +20,7 @@
+@@ -15,11 +15,13 @@
+ 
+ #define pr_fmt(fmt)	"nvmap: %s() " fmt, __func__
+ 
++#include <asm/dma-iommu.h>
+ #include <linux/list.h>
+ #include <linux/slab.h>
  #include <linux/uaccess.h>
  #include <linux/export.h>
  #include <linux/nvmap.h>
@@ -220,7 +310,7 @@ index 951191bd85fc..5e115937faa7 100644
  #include <linux/dma-buf.h>
  #include <linux/spinlock.h>
  #include <linux/mutex.h>
-@@ -89,14 +90,14 @@ int nvmap_dmabuf_stash_init(void)
+@@ -89,14 +91,14 @@ int nvmap_dmabuf_stash_init(void)
  	return 0;
  }
  
@@ -238,7 +328,7 @@ index 951191bd85fc..5e115937faa7 100644
  	return 0;
  }
  
-@@ -404,28 +405,26 @@ static void nvmap_dmabuf_release(struct dma_buf *dmabuf)
+@@ -404,28 +406,26 @@ static void nvmap_dmabuf_release(struct dma_buf *dmabuf)
  }
  
  static int nvmap_dmabuf_begin_cpu_access(struct dma_buf *dmabuf,
@@ -274,7 +364,7 @@ index 951191bd85fc..5e115937faa7 100644
  static void *nvmap_dmabuf_kmap(struct dma_buf *dmabuf, unsigned long page_num)
  {
  	struct nvmap_handle_info *info = dmabuf->priv;
-@@ -449,7 +448,7 @@ static void *nvmap_dmabuf_kmap_atomic(struct dma_buf *dmabuf,
+@@ -449,7 +449,7 @@ static void *nvmap_dmabuf_kmap_atomic(struct dma_buf *dmabuf,
  	WARN(1, "%s() can't be called from atomic\n", __func__);
  	return NULL;
  }
@@ -283,7 +373,7 @@ index 951191bd85fc..5e115937faa7 100644
  int __nvmap_map(struct nvmap_handle *h, struct vm_area_struct *vma)
  {
  	struct nvmap_vma_priv *priv;
-@@ -489,9 +488,9 @@ int __nvmap_map(struct nvmap_handle *h, struct vm_area_struct *vma)
+@@ -489,9 +489,9 @@ int __nvmap_map(struct nvmap_handle *h, struct vm_area_struct *vma)
  	}
  	priv->handle = h;
  
@@ -295,7 +385,7 @@ index 951191bd85fc..5e115937faa7 100644
  	vma->vm_ops = &nvmap_vma_ops;
  	BUG_ON(vma->vm_private_data != NULL);
  	vma->vm_private_data = priv;
-@@ -509,20 +508,22 @@ static int nvmap_dmabuf_mmap(struct dma_buf *dmabuf, struct vm_area_struct *vma)
+@@ -509,20 +509,22 @@ static int nvmap_dmabuf_mmap(struct dma_buf *dmabuf, struct vm_area_struct *vma)
  	return __nvmap_map(info->handle, vma);
  }
  
@@ -322,7 +412,7 @@ index 951191bd85fc..5e115937faa7 100644
  }
  
  static int nvmap_dmabuf_set_private(struct dma_buf *dmabuf,
-@@ -593,6 +594,7 @@ static struct dma_buf_ops nvmap_dma_buf_ops = {
+@@ -593,6 +595,7 @@ static struct dma_buf_ops nvmap_dma_buf_ops = {
  	.release	= nvmap_dmabuf_release,
  	.begin_cpu_access = nvmap_dmabuf_begin_cpu_access,
  	.end_cpu_access = nvmap_dmabuf_end_cpu_access,
@@ -330,7 +420,7 @@ index 951191bd85fc..5e115937faa7 100644
  #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)
  	.map_atomic	= nvmap_dmabuf_kmap_atomic,
  	.map		= nvmap_dmabuf_kmap,
-@@ -602,6 +604,7 @@ static struct dma_buf_ops nvmap_dma_buf_ops = {
+@@ -602,6 +605,7 @@ static struct dma_buf_ops nvmap_dma_buf_ops = {
  	.kmap		= nvmap_dmabuf_kmap,
  	.kunmap		= nvmap_dmabuf_kunmap,
  #endif

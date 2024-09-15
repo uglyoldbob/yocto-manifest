@@ -1,0 +1,1440 @@
+From 819347e4847531c95ce0c975953f9d111a9d69f5 Mon Sep 17 00:00:00 2001
+From: Thomas Epperson <thomas.epperson@gmail.com>
+Date: Sun, 15 Sep 2024 09:05:22 -0500
+Subject: [PATCH] Nvmap part 2
+
+---
+ drivers/iommu/tegra-iommu.c              |   1 +
+ drivers/video/tegra/nvmap/nvmap_alloc.c  |   6 +-
+ drivers/video/tegra/nvmap/nvmap_cache.c  |  17 +-
+ drivers/video/tegra/nvmap/nvmap_dev.c    |  23 +-
+ drivers/video/tegra/nvmap/nvmap_dmabuf.c |  41 ++-
+ drivers/video/tegra/nvmap/nvmap_fault.c  |  23 +-
+ drivers/video/tegra/nvmap/nvmap_heap.c   |   7 +-
+ drivers/video/tegra/nvmap/nvmap_init.c   |  10 +-
+ drivers/video/tegra/nvmap/nvmap_ioctl.c  |   1 +
+ drivers/video/tegra/nvmap/nvmap_mm.c     |  26 +-
+ drivers/video/tegra/nvmap/nvmap_pp.c     |   2 +-
+ include/asm-generic/dma-coherent.h       |  62 ++++
+ include/linux/dma-attrs.h                |  26 ++
+ include/linux/dma-buf.h                  |   4 +
+ include/linux/dma-contiguous.h           | 183 ++++++++++
+ include/linux/dma-map-ops.h              |  14 +
+ include/linux/dma-mapping.h              |  27 ++
+ include/linux/tegra-ivc.h                | 436 +++++++++++++++++++++++
+ 18 files changed, 835 insertions(+), 74 deletions(-)
+ create mode 100644 include/asm-generic/dma-coherent.h
+ create mode 100644 include/linux/dma-attrs.h
+ create mode 100755 include/linux/dma-contiguous.h
+ create mode 100644 include/linux/tegra-ivc.h
+
+diff --git a/drivers/iommu/tegra-iommu.c b/drivers/iommu/tegra-iommu.c
+index f77aac2bd3af..407b2ee660d8 100644
+--- a/drivers/iommu/tegra-iommu.c
++++ b/drivers/iommu/tegra-iommu.c
+@@ -13,6 +13,7 @@
+ 
+ #include <linux/platform_device.h>
+ #include <linux/dma-mapping.h>
++#include <linux/dma-contiguous.h>
+ #include <linux/dma-direct.h>
+ #include <linux/iommu.h>
+ 
+diff --git a/drivers/video/tegra/nvmap/nvmap_alloc.c b/drivers/video/tegra/nvmap/nvmap_alloc.c
+index 7cac44f30281..825080b3df94 100644
+--- a/drivers/video/tegra/nvmap/nvmap_alloc.c
++++ b/drivers/video/tegra/nvmap/nvmap_alloc.c
+@@ -17,6 +17,7 @@
+ 
+ #define pr_fmt(fmt)	"%s: " fmt, __func__
+ 
++#include <linux/dma-attrs.h>
+ #include <linux/moduleparam.h>
+ #include <linux/random.h>
+ #include <soc/tegra/fuse.h>
+@@ -573,9 +574,10 @@ static struct device *nvmap_heap_pgalloc_dev(unsigned long type)
+ 	if (IS_ERR(dma_dev))
+ 		return dma_dev;
+ 
+-	ret = dma_set_resizable_heap_floor_size(dma_dev, 0);
++/*	ret = dma_set_resizable_heap_floor_size(dma_dev, 0);
+ 	if (ret)
+ 		return ERR_PTR(ret);
++*/
+ 	return dma_dev;
+ }
+ 
+@@ -923,7 +925,7 @@ void _nvmap_handle_free(struct nvmap_handle *h)
+ 	list_for_each_entry_safe(curr, next, &h->dmabuf_priv, list) {
+ 		curr->priv_release(curr->priv);
+ 		list_del(&curr->list);
+-		kzfree(curr);
++		kfree_sensitive(curr);
+ 	}
+ 
+ 	if (nvmap_handle_remove(nvmap_dev, h) != 0)
+diff --git a/drivers/video/tegra/nvmap/nvmap_cache.c b/drivers/video/tegra/nvmap/nvmap_cache.c
+index a26615a949b6..ba4085e96112 100644
+--- a/drivers/video/tegra/nvmap/nvmap_cache.c
++++ b/drivers/video/tegra/nvmap/nvmap_cache.c
+@@ -18,6 +18,7 @@
+ #include <linux/highmem.h>
+ #include <linux/io.h>
+ #include <linux/debugfs.h>
++#include <linux/dma-map-ops.h>
+ #include <linux/of.h>
+ #include <soc/tegra/fuse.h>
+ 
+@@ -174,9 +175,15 @@ void inner_cache_maint(unsigned int op, void *vaddr, size_t size)
+ 		dcache_clean_inval_poc((unsigned long)vaddr, size);
+ #endif
+ 	else if (op == NVMAP_CACHE_OP_INV)
+-		__dma_map_area(vaddr, size, DMA_FROM_DEVICE);
++	{
++		arch_sync_dma_for_cpu((phys_addr_t)vaddr, size, DMA_FROM_DEVICE);
++		dcache_clean_poc((phys_addr_t)vaddr, (phys_addr_t)vaddr + size);
++	}
+ 	else
+-		__dma_map_area(vaddr, size, DMA_TO_DEVICE);
++	{
++		arch_sync_dma_for_cpu((phys_addr_t)vaddr, size, DMA_TO_DEVICE);
++		dcache_clean_poc((phys_addr_t)vaddr, (phys_addr_t)vaddr + size);
++	}
+ }
+ 
+ static void heap_page_cache_maint(
+@@ -310,7 +317,7 @@ int nvmap_cache_maint_phys_range(unsigned int op, phys_addr_t pstart,
+ 			loop, PG_PROT_KERNEL);
+ 		inner_cache_maint(op, base, next - loop);
+ 		loop = next;
+-		unmap_kernel_range(kaddr, PAGE_SIZE);
++		vunmap_range((unsigned long)kaddr, (unsigned long)kaddr + PAGE_SIZE);
+ 	}
+ 
+ 	free_vm_area(area);
+@@ -440,7 +447,7 @@ int __nvmap_cache_maint(struct nvmap_client *client,
+ 	if (!handle)
+ 		return -EINVAL;
+ 
+-	down_read(&current->mm->mmap_sem);
++	down_read(&current->mm->mmap_lock);
+ 
+ 	vma = find_vma(current->active_mm, (unsigned long)op->addr);
+ 	if (!vma || !is_nvmap_vma(vma) ||
+@@ -465,7 +472,7 @@ int __nvmap_cache_maint(struct nvmap_client *client,
+ 	err = __nvmap_do_cache_maint(client, priv->handle, start, end, op->op,
+ 				     false);
+ out:
+-	up_read(&current->mm->mmap_sem);
++	up_read(&current->mm->mmap_lock);
+ 	nvmap_handle_put(handle);
+ 	return err;
+ }
+diff --git a/drivers/video/tegra/nvmap/nvmap_dev.c b/drivers/video/tegra/nvmap/nvmap_dev.c
+index eb579146485f..30b94773da19 100644
+--- a/drivers/video/tegra/nvmap/nvmap_dev.c
++++ b/drivers/video/tegra/nvmap/nvmap_dev.c
+@@ -23,7 +23,9 @@
+ #include <linux/kernel.h>
+ #include <linux/device.h>
+ #include <linux/oom.h>
++#include <linux/pagewalk.h>
+ #include <linux/platform_device.h>
++#include <linux/sched/clock.h>
+ #include <linux/seq_file.h>
+ #include <linux/slab.h>
+ #include <linux/spinlock.h>
+@@ -320,9 +322,9 @@ static long nvmap_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+ 		return -ENOTTY;
+ 
+ 	if (_IOC_DIR(cmd) & _IOC_READ)
+-		err = !access_ok(VERIFY_WRITE, uarg, _IOC_SIZE(cmd));
++		err = !access_ok(uarg, _IOC_SIZE(cmd));
+ 	if (!err && (_IOC_DIR(cmd) & _IOC_WRITE))
+-		err = !access_ok(VERIFY_READ, uarg, _IOC_SIZE(cmd));
++		err = !access_ok(uarg, _IOC_SIZE(cmd));
+ 
+ 	if (err)
+ 		return -EFAULT;
+@@ -1078,7 +1080,7 @@ static int procrank_pte_entry(pte_t *pte, unsigned long addr, unsigned long end,
+ 		swp_entry_t swpent = pte_to_swp_entry(*pte);
+ 
+ 		if (is_migration_entry(swpent))
+-			page = migration_entry_to_page(swpent);
++			page = pfn_swap_entry_to_page(swpent);
+ 	}
+ 
+ 	if (!page)
+@@ -1103,8 +1105,11 @@ static void nvmap_iovmm_get_client_mss(struct nvmap_client *client, u64 *pss,
+ 	struct rb_node *n;
+ 	struct nvmap_vma_list *tmp;
+ 	struct procrank_stats mss;
+-	struct mm_walk procrank_walk = {
++	struct mm_walk_ops ops = {
+ 		.pte_entry = procrank_pte_entry,
++	};
++	struct mm_walk procrank_walk = {
++		.ops = &ops,
+ 		.private = &mss,
+ 	};
+ 	struct mm_struct *mm;
+@@ -1116,7 +1121,7 @@ static void nvmap_iovmm_get_client_mss(struct nvmap_client *client, u64 *pss,
+ 			PTRACE_MODE_READ_FSCREDS);
+ 	if (!mm || IS_ERR(mm)) return;
+ 
+-	down_read(&mm->mmap_sem);
++	down_read(&mm->mmap_lock);
+ 	procrank_walk.mm = mm;
+ 
+ 	nvmap_ref_lock(client);
+@@ -1133,16 +1138,16 @@ static void nvmap_iovmm_get_client_mss(struct nvmap_client *client, u64 *pss,
+ 		list_for_each_entry(tmp, &h->vmas, list) {
+ 			if (client->task->pid == tmp->pid) {
+ 				mss.vma = tmp->vma;
+-				walk_page_range(tmp->vma->vm_start,
+-						tmp->vma->vm_end,
+-						&procrank_walk);
++				walk_page_range(mm, tmp->vma->vm_start,
++						tmp->vma->vm_end, &ops,
++						&mss);
+ 			}
+ 		}
+ 		mutex_unlock(&h->lock);
+ 		*total += h->size / atomic_read(&h->share_count);
+ 	}
+ 
+-	up_read(&mm->mmap_sem);
++	up_read(&mm->mmap_lock);
+ 	mmput(mm);
+ 	*pss = (mss.pss >> PSS_SHIFT);
+ 	nvmap_ref_unlock(client);
+diff --git a/drivers/video/tegra/nvmap/nvmap_dmabuf.c b/drivers/video/tegra/nvmap/nvmap_dmabuf.c
+index 951191bd85fc..5e115937faa7 100644
+--- a/drivers/video/tegra/nvmap/nvmap_dmabuf.c
++++ b/drivers/video/tegra/nvmap/nvmap_dmabuf.c
+@@ -20,6 +20,7 @@
+ #include <linux/uaccess.h>
+ #include <linux/export.h>
+ #include <linux/nvmap.h>
++#include <linux/dma-attrs.h>
+ #include <linux/dma-buf.h>
+ #include <linux/spinlock.h>
+ #include <linux/mutex.h>
+@@ -89,14 +90,14 @@ int nvmap_dmabuf_stash_init(void)
+ 	return 0;
+ }
+ 
+-static int nvmap_dmabuf_attach(struct dma_buf *dmabuf, struct device *dev,
++static int nvmap_dmabuf_attach(struct dma_buf *dmabuf,
+ 			       struct dma_buf_attachment *attach)
+ {
+ 	struct nvmap_handle_info *info = dmabuf->priv;
+ 
+-	trace_nvmap_dmabuf_attach(dmabuf, dev);
++	trace_nvmap_dmabuf_attach(dmabuf, attach->dev);
+ 
+-	dev_dbg(dev, "%s() 0x%p\n", __func__, info->handle);
++	dev_dbg(attach->dev, "%s() 0x%p\n", __func__, info->handle);
+ 	return 0;
+ }
+ 
+@@ -404,28 +405,26 @@ static void nvmap_dmabuf_release(struct dma_buf *dmabuf)
+ }
+ 
+ static int nvmap_dmabuf_begin_cpu_access(struct dma_buf *dmabuf,
+-					  size_t start, size_t len,
+ 					  enum dma_data_direction dir)
+ {
+ 	struct nvmap_handle_info *info = dmabuf->priv;
+ 
+-	trace_nvmap_dmabuf_begin_cpu_access(dmabuf, start, len);
+-	return __nvmap_do_cache_maint(NULL, info->handle, start, start + len,
+-				      NVMAP_CACHE_OP_WB_INV, false);
++	trace_nvmap_dmabuf_begin_cpu_access(dmabuf, 42, 42);
++	return __nvmap_do_cache_maint(NULL, info->handle, NVMAP_CACHE_OP_WB_INV, 42, 42, false);
+ }
+ 
+-static void nvmap_dmabuf_end_cpu_access(struct dma_buf *dmabuf,
+-				       size_t start, size_t len,
++static int nvmap_dmabuf_end_cpu_access(struct dma_buf *dmabuf,
+ 				       enum dma_data_direction dir)
+ {
+ 	struct nvmap_handle_info *info = dmabuf->priv;
+ 
+-	trace_nvmap_dmabuf_end_cpu_access(dmabuf, start, len);
++	trace_nvmap_dmabuf_end_cpu_access(dmabuf, 42, 42);
+ 	__nvmap_do_cache_maint(NULL, info->handle,
+-				   start, start + len,
++				   42, 42,
+ 				   NVMAP_CACHE_OP_WB, false);
++	return 0;
+ }
+-
++/*
+ static void *nvmap_dmabuf_kmap(struct dma_buf *dmabuf, unsigned long page_num)
+ {
+ 	struct nvmap_handle_info *info = dmabuf->priv;
+@@ -449,7 +448,7 @@ static void *nvmap_dmabuf_kmap_atomic(struct dma_buf *dmabuf,
+ 	WARN(1, "%s() can't be called from atomic\n", __func__);
+ 	return NULL;
+ }
+-
++*/
+ int __nvmap_map(struct nvmap_handle *h, struct vm_area_struct *vma)
+ {
+ 	struct nvmap_vma_priv *priv;
+@@ -489,9 +488,9 @@ int __nvmap_map(struct nvmap_handle *h, struct vm_area_struct *vma)
+ 	}
+ 	priv->handle = h;
+ 
+-	vma->vm_flags |= VM_SHARED | VM_DONTEXPAND |
++	vm_flags_set(vma, VM_SHARED | VM_DONTEXPAND |
+ 			  VM_DONTDUMP | VM_DONTCOPY |
+-			  (h->heap_pgalloc ? 0 : VM_PFNMAP);
++			  (h->heap_pgalloc ? 0 : VM_PFNMAP));
+ 	vma->vm_ops = &nvmap_vma_ops;
+ 	BUG_ON(vma->vm_private_data != NULL);
+ 	vma->vm_private_data = priv;
+@@ -509,20 +508,22 @@ static int nvmap_dmabuf_mmap(struct dma_buf *dmabuf, struct vm_area_struct *vma)
+ 	return __nvmap_map(info->handle, vma);
+ }
+ 
+-static void *nvmap_dmabuf_vmap(struct dma_buf *dmabuf)
++static int nvmap_dmabuf_vmap(struct dma_buf *dmabuf, struct iosys_map *map)
+ {
+ 	struct nvmap_handle_info *info = dmabuf->priv;
+ 
+ 	trace_nvmap_dmabuf_vmap(dmabuf);
+-	return __nvmap_mmap(info->handle);
++	struct iosys_map t = IOSYS_MAP_INIT_VADDR(__nvmap_mmap(info->handle));
++	*map = t;
++	return 0;
+ }
+ 
+-static void nvmap_dmabuf_vunmap(struct dma_buf *dmabuf, void *vaddr)
++static void nvmap_dmabuf_vunmap(struct dma_buf *dmabuf, struct iosys_map *map)
+ {
+ 	struct nvmap_handle_info *info = dmabuf->priv;
+ 
+ 	trace_nvmap_dmabuf_vunmap(dmabuf);
+-	__nvmap_munmap(info->handle, vaddr);
++	__nvmap_munmap(info->handle, map->vaddr);
+ }
+ 
+ static int nvmap_dmabuf_set_private(struct dma_buf *dmabuf,
+@@ -593,6 +594,7 @@ static struct dma_buf_ops nvmap_dma_buf_ops = {
+ 	.release	= nvmap_dmabuf_release,
+ 	.begin_cpu_access = nvmap_dmabuf_begin_cpu_access,
+ 	.end_cpu_access = nvmap_dmabuf_end_cpu_access,
++/*
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)
+ 	.map_atomic	= nvmap_dmabuf_kmap_atomic,
+ 	.map		= nvmap_dmabuf_kmap,
+@@ -602,6 +604,7 @@ static struct dma_buf_ops nvmap_dma_buf_ops = {
+ 	.kmap		= nvmap_dmabuf_kmap,
+ 	.kunmap		= nvmap_dmabuf_kunmap,
+ #endif
++*/
+ 	.mmap		= nvmap_dmabuf_mmap,
+ 	.vmap		= nvmap_dmabuf_vmap,
+ 	.vunmap		= nvmap_dmabuf_vunmap,
+diff --git a/drivers/video/tegra/nvmap/nvmap_fault.c b/drivers/video/tegra/nvmap/nvmap_fault.c
+index 99b958d6a9ef..84618da321fd 100644
+--- a/drivers/video/tegra/nvmap/nvmap_fault.c
++++ b/drivers/video/tegra/nvmap/nvmap_fault.c
+@@ -15,25 +15,23 @@
+ 
+ #define pr_fmt(fmt)	"%s: " fmt, __func__
+ 
++#include <asm-generic/dma-coherent.h>
+ #include <trace/events/nvmap.h>
+ #include <linux/highmem.h>
+ 
+ #include "nvmap_priv.h"
+ 
+ static void nvmap_vma_close(struct vm_area_struct *vma);
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)
+-static int nvmap_vma_fault(struct vm_fault *vmf);
+-#else
+-static int nvmap_vma_fault(struct vm_area_struct *vma, struct vm_fault *vmf);
+-#endif
++static vm_fault_t nvmap_vma_fault(struct vm_fault *vmf);
++/*
+ static bool nvmap_fixup_prot(struct vm_area_struct *vma,
+ 		unsigned long addr, pgoff_t pgoff);
+-
++*/
+ struct vm_operations_struct nvmap_vma_ops = {
+ 	.open		= nvmap_vma_open,
+ 	.close		= nvmap_vma_close,
+ 	.fault		= nvmap_vma_fault,
+-	.fixup_prot	= nvmap_fixup_prot,
++//	.fixup_prot	= nvmap_fixup_prot,
+ };
+ 
+ int is_nvmap_vma(struct vm_area_struct *vma)
+@@ -156,7 +154,7 @@ static void nvmap_vma_close(struct vm_area_struct *vma)
+ 	BUG_ON(!vma_found);
+ 	nvmap_umaps_dec(h);
+ 
+-	if (__atomic_add_unless(&priv->count, -1, 0) == 1) {
++	if (atomic_add_unless(&priv->count, -1, 0) == 1) {
+ 		if (h->heap_pgalloc) {
+ 			for (i = 0; i < nr_page; i++) {
+ 				struct page *page;
+@@ -174,7 +172,7 @@ static void nvmap_vma_close(struct vm_area_struct *vma)
+ 	}
+ }
+ 
+-static int nvmap_vma_fault(struct vm_fault *vmf)
++static vm_fault_t nvmap_vma_fault(struct vm_fault *vmf)
+ {
+ 	struct page *page;
+ 	struct nvmap_vma_priv *priv;
+@@ -200,7 +198,7 @@ static int nvmap_vma_fault(struct vm_fault *vmf)
+ 		BUG_ON(priv->handle->carveout->base & ~PAGE_MASK);
+ 		pfn = ((priv->handle->carveout->base + offs) >> PAGE_SHIFT);
+ 		if (!pfn_valid(pfn)) {
+-			vm_insert_pfn(vma,
++			vmf_insert_pfn(vma,
+ 				(unsigned long)vmf_address, pfn);
+ 			return VM_FAULT_NOPAGE;
+ 		}
+@@ -244,7 +242,7 @@ static int nvmap_vma_fault(struct vm_fault *vmf)
+ 	vmf->page = page;
+ 	return (page) ? 0 : VM_FAULT_SIGBUS;
+ }
+-
++/*
+ static bool nvmap_fixup_prot(struct vm_area_struct *vma,
+ 		unsigned long addr, pgoff_t pgoff)
+ {
+@@ -274,7 +272,7 @@ static bool nvmap_fixup_prot(struct vm_area_struct *vma,
+ 		goto unlock;
+ 
+ 	page = nvmap_to_page(priv->handle->pgalloc.pages[offs]);
+-	/* inner cache maint */
++	// inner cache maint
+ 	kaddr  = kmap(page);
+ 	BUG_ON(!kaddr);
+ 	inner_cache_maint(NVMAP_CACHE_OP_WB_INV, kaddr, PAGE_SIZE);
+@@ -290,3 +288,4 @@ static bool nvmap_fixup_prot(struct vm_area_struct *vma,
+ 	mutex_unlock(&priv->handle->lock);
+ 	return true;
+ }
++*/
+diff --git a/drivers/video/tegra/nvmap/nvmap_heap.c b/drivers/video/tegra/nvmap/nvmap_heap.c
+index 492deb695595..59e0ef7a5264 100644
+--- a/drivers/video/tegra/nvmap/nvmap_heap.c
++++ b/drivers/video/tegra/nvmap/nvmap_heap.c
+@@ -17,6 +17,9 @@
+ 
+ #define pr_fmt(fmt)	"%s: " fmt, __func__
+ 
++#include <linux/dma-contiguous.h>
++#include <linux/dma-map-ops.h>
++#include <asm-generic/dma-coherent.h>
+ #include <linux/debugfs.h>
+ #include <linux/device.h>
+ #include <linux/kernel.h>
+@@ -36,6 +39,7 @@
+ #endif
+ 
+ #include <linux/nvmap.h>
++#include <linux/dma-attrs.h>
+ #include <linux/dma-mapping.h>
+ //#include <linux/dma-contiguous.h>
+ 
+@@ -443,8 +447,7 @@ struct nvmap_heap *nvmap_heap_create(struct device *parent,
+ 		int err;
+ 
+ 		/* declare Non-CMA heap */
+-		err = dma_declare_coherent_memory(h->dma_dev, 0, base, len,
+-				DMA_MEMORY_NOMAP | DMA_MEMORY_EXCLUSIVE);
++		err = dma_declare_coherent_memory(h->dma_dev, 0, base, len);
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)
+ 		if (!err) {
+ #else
+diff --git a/drivers/video/tegra/nvmap/nvmap_init.c b/drivers/video/tegra/nvmap/nvmap_init.c
+index 48f3727b5e05..139bf1af9055 100644
+--- a/drivers/video/tegra/nvmap/nvmap_init.c
++++ b/drivers/video/tegra/nvmap/nvmap_init.c
+@@ -13,6 +13,7 @@
+ 
+ #define pr_fmt(fmt) "%s: " fmt, __func__
+ 
++#include <linux/kmemleak.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
+ #include <linux/of_fdt.h>
+@@ -30,14 +31,10 @@
+ #include <linux/cma.h>
+ #endif
+ 
+-#include <asm/dma-contiguous.h>
+-
+ #include "nvmap_priv.h"
+-#include "iomap.h"
+-#include "board.h"
+ #include <linux/platform/tegra/common.h>
+ 
+-#include <soc/tegra/chip-id.h>
++#include <soc/tegra/fuse.h>
+ #if IS_ENABLED(CONFIG_TEGRA_VIRTUALIZATION)
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0)
+ #include <soc/tegra/virt/syscalls.h>
+@@ -395,8 +392,7 @@ static int __init nvmap_co_device_init(struct reserved_mem *rmem,
+ 
+ 	if (!co->cma_dev) {
+ 		err = dma_declare_coherent_memory(co->dma_dev, 0,
+-				co->base, co->size,
+-				DMA_MEMORY_NOMAP | DMA_MEMORY_EXCLUSIVE);
++				co->base, co->size);
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)
+ 		if (!err) {
+ #else
+diff --git a/drivers/video/tegra/nvmap/nvmap_ioctl.c b/drivers/video/tegra/nvmap/nvmap_ioctl.c
+index a6c4544d91de..0e6a6959d990 100644
+--- a/drivers/video/tegra/nvmap/nvmap_ioctl.c
++++ b/drivers/video/tegra/nvmap/nvmap_ioctl.c
+@@ -29,6 +29,7 @@
+ #include <linux/vmalloc.h>
+ #include <linux/highmem.h>
+ #include <linux/mm.h>
++#include <linux/syscalls.h>
+ 
+ #include <asm/io.h>
+ #include <asm/memory.h>
+diff --git a/drivers/video/tegra/nvmap/nvmap_mm.c b/drivers/video/tegra/nvmap/nvmap_mm.c
+index b6244e51bae7..529ac0c3cc57 100644
+--- a/drivers/video/tegra/nvmap/nvmap_mm.c
++++ b/drivers/video/tegra/nvmap/nvmap_mm.c
+@@ -63,19 +63,11 @@ void nvmap_zap_handle(struct nvmap_handle *handle, u64 offset, u64 size)
+ 			 * zapping needs special care. zap entire range for now.
+ 			 * FIXME: optimze zapping.
+ 			 */
+-			zap_page_range(vma, vma->vm_start,
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)
+-				vma->vm_end - vma->vm_start);
+-#else
++			zap_page_range_single(vma, vma->vm_start,
+ 				vma->vm_end - vma->vm_start, NULL);
+-#endif
+ 		else
+-			zap_page_range(vma, vma->vm_start + offset,
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)
+-				vm_size);
+-#else
++			zap_page_range_single(vma, vma->vm_start + offset,
+ 				vm_size, NULL);
+-#endif
+ 	}
+ 	mutex_unlock(&handle->lock);
+ }
+@@ -121,10 +113,10 @@ static int nvmap_prot_handle(struct nvmap_handle *handle, u64 offset,
+ 			vm_size = vma->vm_end - vma->vm_start;
+ 
+ 		if (vma->vm_mm != current->mm)
+-			down_write(&vma->vm_mm->mmap_sem);
++			down_write(&vma->vm_mm->mmap_lock);
+ 		switch (op) {
+ 		case NVMAP_HANDLE_PROT_NONE:
+-			vma->vm_flags = vma_list->save_vm_flags;
++			vm_flags_set(vma, vma_list->save_vm_flags);
+ 			(void)vma_set_page_prot(vma);
+ 			if (nvmap_handle_track_dirty(handle) &&
+ 			    !atomic_read(&handle->pgalloc.ndirty)) {
+@@ -135,11 +127,11 @@ static int nvmap_prot_handle(struct nvmap_handle *handle, u64 offset,
+ 					vma->vm_start + vm_size, VM_NONE);
+ 			if (err)
+ 				goto try_unlock;
+-			vma->vm_flags = vma_list->save_vm_flags;
++			vm_flags_set(vma, vma_list->save_vm_flags);
+ 			(void)vma_set_page_prot(vma);
+ 			break;
+ 		case NVMAP_HANDLE_PROT_RESTORE:
+-			vma->vm_flags = VM_NONE;
++			vm_flags_set(vma, VM_NONE);
+ 			(void)vma_set_page_prot(vma);
+ 			err = mprotect_fixup(vma, &prev, vma->vm_start,
+ 					vma->vm_start + vm_size,
+@@ -153,7 +145,7 @@ static int nvmap_prot_handle(struct nvmap_handle *handle, u64 offset,
+ 		};
+ try_unlock:
+ 		if (vma->vm_mm != current->mm)
+-			up_write(&vma->vm_mm->mmap_sem);
++			up_write(&vma->vm_mm->mmap_lock);
+ 		if (err)
+ 			goto finish;
+ 	}
+@@ -168,7 +160,7 @@ static int nvmap_prot_handles(struct nvmap_handle **handles, u64 *offsets,
+ 	int i, err = 0;
+ 	u32 *offs_32 = (u32 *)offsets, *sizes_32 = (u32 *)sizes;
+ 
+-	down_write(&current->mm->mmap_sem);
++	down_write(&current->mm->mmap_lock);
+ 	for (i = 0; i < nr; i++) {
+ 		err = nvmap_prot_handle(handles[i],
+ 				is_32 ? offs_32[i] : offsets[i],
+@@ -180,7 +172,7 @@ static int nvmap_prot_handles(struct nvmap_handle **handles, u64 *offsets,
+ 		}
+ 	}
+ finish:
+-	up_write(&current->mm->mmap_sem);
++	up_write(&current->mm->mmap_lock);
+ 	return err;
+ }
+ 
+diff --git a/drivers/video/tegra/nvmap/nvmap_pp.c b/drivers/video/tegra/nvmap/nvmap_pp.c
+index cdb08fd029aa..7dd2591a68ae 100644
+--- a/drivers/video/tegra/nvmap/nvmap_pp.c
++++ b/drivers/video/tegra/nvmap/nvmap_pp.c
+@@ -717,7 +717,7 @@ int nvmap_page_pool_init(struct nvmap_device *dev)
+ 	if (IS_ERR(background_allocator))
+ 		goto fail;
+ 
+-	register_shrinker(&nvmap_page_pool_shrinker);
++	register_shrinker(&nvmap_page_pool_shrinker, "nvmap_page_pool_init");
+ 
+ 	return 0;
+ fail:
+diff --git a/include/asm-generic/dma-coherent.h b/include/asm-generic/dma-coherent.h
+new file mode 100644
+index 000000000000..09153288ec58
+--- /dev/null
++++ b/include/asm-generic/dma-coherent.h
+@@ -0,0 +1,62 @@
++#ifndef DMA_COHERENT_H
++#define DMA_COHERENT_H
++
++#ifdef CONFIG_HAVE_GENERIC_DMA_COHERENT
++/*
++ * These three functions are only for dma allocator.
++ * Don't use them in device drivers.
++ */
++int dma_alloc_from_coherent_attr(struct device *dev, ssize_t size,
++				       dma_addr_t *dma_handle, void **ret,
++				       unsigned long attrs);
++int dma_release_from_coherent_attr(struct device *dev, size_t size, void *vaddr,
++				       unsigned long attrs, dma_addr_t dma_handle);
++#define dma_alloc_from_coherent(d, s, h, r) \
++	 dma_alloc_from_coherent_attr(d, s, h, r, 0)
++#define dma_release_from_coherent(d, s, v) \
++	 dma_release_from_coherent_attr(d, s, v, 0, 0)
++
++int dma_mmap_from_coherent(struct device *dev, struct vm_area_struct *vma,
++			    void *cpu_addr, size_t size, int *ret);
++/*
++ * Standard interface
++ */
++#define ARCH_HAS_DMA_DECLARE_COHERENT_MEMORY
++struct dma_declare_info;
++struct dma_coherent_stats;
++
++extern int
++dma_declare_coherent_resizable_cma_memory(struct device *dev,
++				struct dma_declare_info *dma_info);
++
++extern int
++dma_set_resizable_heap_floor_size(struct device *dev, size_t floor_size);
++
++int dma_declare_coherent_memory(struct device *dev, phys_addr_t phys_addr,
++				dma_addr_t device_addr, size_t size, int flags);
++
++int _dma_declare_coherent_memory(struct device *dev, phys_addr_t phys_addr,
++				dma_addr_t device_addr, size_t size,
++				unsigned long alloc_shift, int flags);
++unsigned long dma_get_coherent_memory_alloc_shift(struct device *dev);
++
++void dma_release_declared_memory(struct device *dev);
++
++bool dma_is_coherent_dev(struct device *dev);
++
++extern int
++dma_get_coherent_stats(struct device *dev,
++			struct dma_coherent_stats *stats);
++
++#else
++#define dma_alloc_from_coherent_attr(dev, size, handle, ret, attr) (0)
++#define dma_release_from_coherent_attr(dev, size, vaddr, attr, dma_handle) (0)
++#define dma_alloc_from_coherent(dev, size, handle, ret) (0)
++#define dma_release_from_coherent(dev, order, vaddr) (0)
++#define dma_mmap_from_coherent(dev, vma, vaddr, order, ret) (0)
++#define dma_declare_coherent_resizable_cma_memory(dev, dma_info) (0)
++#define dma_is_coherent_dev(dev) (0)
++#define dma_get_coherent_stats(dev, dma_stats)
++#endif
++
++#endif
+diff --git a/include/linux/dma-attrs.h b/include/linux/dma-attrs.h
+new file mode 100644
+index 000000000000..b7d46c61c42e
+--- /dev/null
++++ b/include/linux/dma-attrs.h
+@@ -0,0 +1,26 @@
++#ifndef _DMA_ATTR_H
++#define _DMA_ATTR_H
++
++#include <linux/bitmap.h>
++#include <linux/bitops.h>
++#include <linux/bug.h>
++
++#define DEFINE_DMA_ATTRS(attrs) unsigned long attrs = 0
++#define __DMA_ATTR(attrs) attrs
++typedef unsigned long dma_attr;
++
++/**
++ * dma_set_attr - set a specific attribute
++ * @attr: attribute to set
++ * @attrs: struct dma_attrs (may be NULL)
++ */
++#define dma_set_attr(attr, attrs) (attrs |= attr)
++
++/**
++ * dma_get_attr - check for a specific attribute
++ * @attr: attribute to set
++ * @attrs: struct dma_attrs (may be NULL)
++ */
++#define dma_get_attr(attr, attrs) (attrs & attr)
++
++#endif /* _DMA_ATTR_H */
+diff --git a/include/linux/dma-buf.h b/include/linux/dma-buf.h
+index e10372aba9d8..db48184e1553 100644
+--- a/include/linux/dma-buf.h
++++ b/include/linux/dma-buf.h
+@@ -27,6 +27,9 @@ struct device;
+ struct dma_buf;
+ struct dma_buf_attachment;
+ 
++#define DMABUF_CAN_DEFER_UNMAP		BIT(0)
++#define DMABUF_SKIP_CACHE_SYNC		BIT(1)
++
+ /**
+  * struct dma_buf_ops - operations possible on struct dma_buf
+  * @vmap: [optional] creates a virtual mapping for the buffer into kernel
+@@ -540,6 +543,7 @@ struct dma_buf_export_info {
+ 	const struct dma_buf_ops *ops;
+ 	size_t size;
+ 	int flags;
++	int exp_flags;
+ 	struct dma_resv *resv;
+ 	void *priv;
+ };
+diff --git a/include/linux/dma-contiguous.h b/include/linux/dma-contiguous.h
+new file mode 100755
+index 000000000000..a6785068ae23
+--- /dev/null
++++ b/include/linux/dma-contiguous.h
+@@ -0,0 +1,183 @@
++#ifndef __LINUX_CMA_H
++#define __LINUX_CMA_H
++
++/*
++ * Contiguous Memory Allocator for DMA mapping framework
++ * Copyright (c) 2010-2011 by Samsung Electronics.
++ * Written by:
++ *	Marek Szyprowski <m.szyprowski@samsung.com>
++ *	Michal Nazarewicz <mina86@mina86.com>
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of the
++ * License or (at your optional) any later version of the license.
++ */
++
++/*
++ * Contiguous Memory Allocator
++ *
++ *   The Contiguous Memory Allocator (CMA) makes it possible to
++ *   allocate big contiguous chunks of memory after the system has
++ *   booted.
++ *
++ * Why is it needed?
++ *
++ *   Various devices on embedded systems have no scatter-getter and/or
++ *   IO map support and require contiguous blocks of memory to
++ *   operate.  They include devices such as cameras, hardware video
++ *   coders, etc.
++ *
++ *   Such devices often require big memory buffers (a full HD frame
++ *   is, for instance, more then 2 mega pixels large, i.e. more than 6
++ *   MB of memory), which makes mechanisms such as kmalloc() or
++ *   alloc_page() ineffective.
++ *
++ *   At the same time, a solution where a big memory region is
++ *   reserved for a device is suboptimal since often more memory is
++ *   reserved then strictly required and, moreover, the memory is
++ *   inaccessible to page system even if device drivers don't use it.
++ *
++ *   CMA tries to solve this issue by operating on memory regions
++ *   where only movable pages can be allocated from.  This way, kernel
++ *   can use the memory for pagecache and when device driver requests
++ *   it, allocated pages can be migrated.
++ *
++ * Driver usage
++ *
++ *   CMA should not be used by the device drivers directly. It is
++ *   only a helper framework for dma-mapping subsystem.
++ *
++ *   For more information, see kernel-docs in drivers/base/dma-contiguous.c
++ */
++
++#ifdef __KERNEL__
++
++#include <linux/device.h>
++#include <linux/dma-map-ops.h>
++
++struct cma;
++struct page;
++
++#ifdef CONFIG_DMA_CMA
++
++struct dma_contiguous_stats {
++	phys_addr_t base;
++	size_t size;
++};
++
++void dma_contiguous_reserve(phys_addr_t addr_limit);
++
++int __init dma_contiguous_reserve_area(phys_addr_t size, phys_addr_t base,
++				       phys_addr_t limit, struct cma **res_cma,
++				       bool fixed);
++
++/**
++ * dma_declare_contiguous() - reserve area for contiguous memory handling
++ *			      for particular device
++ * @dev:   Pointer to device structure.
++ * @size:  Size of the reserved memory.
++ * @base:  Start address of the reserved memory (optional, 0 for any).
++ * @limit: End address of the reserved memory (optional, 0 for any).
++ *
++ * This function reserves memory for specified device. It should be
++ * called by board specific code when early allocator (memblock or bootmem)
++ * is still activate.
++ */
++
++static inline int dma_declare_contiguous(struct device *dev, phys_addr_t size,
++					 phys_addr_t base, phys_addr_t limit)
++{
++	struct cma *cma;
++	int ret;
++	ret = dma_contiguous_reserve_area(size, base, limit, &cma, true);
++	if (ret == 0)
++		dev_set_cma_area(dev, cma);
++
++	return ret;
++}
++
++struct page *dma_alloc_at_from_contiguous(struct device *dev, int count,
++				       unsigned int order, phys_addr_t at_addr,
++				       bool map_non_cached);
++bool dma_release_from_contiguous(struct device *dev, struct page *pages,
++				 int count);
++int dma_get_contiguous_stats(struct device *dev,
++			struct dma_contiguous_stats *stats);
++
++bool dma_contiguous_should_replace_page(struct page *page);
++int dma_contiguous_enable_replace_pages(struct device *dev);
++#else
++
++struct dma_contiguous_stats;
++
++static inline struct cma *dev_get_cma_area(struct device *dev)
++{
++	return NULL;
++}
++
++static inline void dev_set_cma_area(struct device *dev, struct cma *cma) { }
++
++static inline void dma_contiguous_set_default(struct cma *cma) { }
++
++static inline void dma_contiguous_reserve(phys_addr_t limit) { }
++
++static inline int dma_contiguous_reserve_area(phys_addr_t size, phys_addr_t base,
++				       phys_addr_t limit, struct cma **res_cma,
++				       bool fixed)
++{
++	return -ENOSYS;
++}
++
++static inline
++int dma_declare_contiguous(struct device *dev, phys_addr_t size,
++			   phys_addr_t base, phys_addr_t limit)
++{
++	return -ENOSYS;
++}
++
++static inline
++struct page *dma_alloc_at_from_contiguous(struct device *dev, int count,
++				       unsigned int order, phys_addr_t at_addr,
++				       bool map_non_cached)
++{
++	return NULL;
++}
++
++static inline
++struct page *dma_alloc_from_contiguous(struct device *dev, int count,
++				       unsigned int order)
++{
++	return NULL;
++}
++
++static inline
++bool dma_release_from_contiguous(struct device *dev, struct page *pages,
++				 int count)
++{
++	return false;
++}
++
++static inline
++int dma_get_contiguous_stats(struct device *dev,
++			struct dma_contiguous_stats *stats)
++{
++	return -ENOSYS;
++}
++
++static inline
++bool dma_contiguous_should_replace_page(struct page *page)
++{
++	return false;
++}
++
++static inline
++int dma_contiguous_enable_replace_pages(struct device *dev)
++{
++	return 0;
++}
++#endif
++
++#endif
++
++#endif
+diff --git a/include/linux/dma-map-ops.h b/include/linux/dma-map-ops.h
+index f2fc203fb8a1..f9acbb50c88f 100644
+--- a/include/linux/dma-map-ops.h
++++ b/include/linux/dma-map-ops.h
+@@ -120,6 +120,12 @@ static inline struct cma *dev_get_cma_area(struct device *dev)
+ 	return dma_contiguous_default_area;
+ }
+ 
++static inline void dev_set_cma_area(struct device *dev, struct cma *cma)
++{
++	if (dev)
++		dev->cma_area = cma;
++}
++
+ void dma_contiguous_reserve(phys_addr_t addr_limit);
+ int __init dma_contiguous_reserve_area(phys_addr_t size, phys_addr_t base,
+ 		phys_addr_t limit, struct cma **res_cma, bool fixed);
+@@ -170,6 +176,14 @@ static inline void dma_free_contiguous(struct device *dev, struct page *page,
+ #endif /* CONFIG_DMA_CMA*/
+ 
+ #ifdef CONFIG_DMA_DECLARE_COHERENT
++
++struct dma_coherent_stats {
++	phys_addr_t base;
++	size_t size;
++	size_t used;
++	size_t max;
++};
++
+ int dma_declare_coherent_memory(struct device *dev, phys_addr_t phys_addr,
+ 		dma_addr_t device_addr, size_t size);
+ void dma_release_coherent_memory(struct device *dev);
+diff --git a/include/linux/dma-mapping.h b/include/linux/dma-mapping.h
+index d0451dfde38d..cbbfd364a69c 100644
+--- a/include/linux/dma-mapping.h
++++ b/include/linux/dma-mapping.h
+@@ -12,6 +12,13 @@
+ #include <linux/bug.h>
+ #include <linux/mem_encrypt.h>
+ 
++/* flags for the coherent memory api */
++#define	DMA_MEMORY_MAP			0x01
++#define DMA_MEMORY_IO			0x02
++#define DMA_MEMORY_INCLUDES_CHILDREN	0x04
++#define DMA_MEMORY_EXCLUSIVE		0x08
++#define DMA_MEMORY_NOMAP		0x10
++
+ /**
+  * List of possible attributes associated with a DMA mapping. The semantics
+  * of each attribute should be defined in Documentation/core-api/dma-attributes.rst.
+@@ -62,6 +69,17 @@
+  */
+ #define DMA_ATTR_PRIVILEGED		(1UL << 9)
+ 
++/*
++ * DMA_ATTR_ALLOC_EXACT_SIZE: This tells the DMA-mapping subsystem to allocate
++ * the exact number of pages
++ */
++#define DMA_ATTR_ALLOC_EXACT_SIZE	(1UL << 10)
++
++/*
++ * DMA_ATTR_SKIP_IOVA_GAP: This tells the DMA-mapping subsystem to skip gap pages
++ */
++#define DMA_ATTR_SKIP_IOVA_GAP	(1UL << 11)
++
+ /*
+  * A dma_addr_t can hold any valid DMA or bus address for the platform.  It can
+  * be given to a device to use as a DMA source or target.  It is specific to a
+@@ -101,6 +119,15 @@ struct dma_resize_notifier {
+ 	struct dma_resize_notifier_ops *ops;
+ };
+ 
++struct dma_declare_info {
++	const char *name;
++	bool resize;
++	phys_addr_t base;
++	size_t size;
++	struct device *cma_dev;
++	struct dma_resize_notifier notifier;
++};
++
+ static inline int dma_mapping_error(struct device *dev, dma_addr_t dma_addr)
+ {
+ 	debug_dma_mapping_error(dev, dma_addr);
+diff --git a/include/linux/tegra-ivc.h b/include/linux/tegra-ivc.h
+new file mode 100644
+index 000000000000..ba135a24a961
+--- /dev/null
++++ b/include/linux/tegra-ivc.h
+@@ -0,0 +1,436 @@
++/*
++ * Copyright (c) 2014-2022, NVIDIA CORPORATION.  All rights reserved.
++ *
++ * This header is BSD licensed so anyone can use the definitions to implement
++ * compatible drivers/servers.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ * 3. Neither the name of NVIDIA CORPORATION nor the names of its contributors
++ *    may be used to endorse or promote products derived from this software
++ *    without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS ``AS IS''
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED.  IN NO EVENT SHALL NVIDIA CORPORATION OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef __TEGRA_IVC_H
++#define __TEGRA_IVC_H
++
++#include <linux/err.h>
++#include <linux/types.h>
++
++struct device_node;
++
++/* in kernel interfaces */
++
++struct tegra_hv_ivc_ops;
++
++struct tegra_hv_ivc_cookie {
++	/* some fields that might be useful */
++	int irq;
++	int peer_vmid;
++	int nframes;
++	int frame_size;
++};
++
++struct tegra_hv_ivc_ops {
++	/* called when data are received */
++	void (*rx_rdy)(struct tegra_hv_ivc_cookie *ivck);
++	/* called when space is available to write data */
++	void (*tx_rdy)(struct tegra_hv_ivc_cookie *ivck);
++};
++
++struct ivc;
++
++struct tegra_hv_ivm_cookie {
++	uint64_t ipa;
++	uint64_t size;
++	unsigned peer_vmid;
++	void *reserved;
++	bool is_vpr;
++	bool can_alloc; /* Only valid when is_vpr == 1 */
++};
++
++int tegra_ivc_write(struct ivc *ivc, const void *buf, size_t size);
++int tegra_ivc_read(struct ivc *ivc, void *buf, size_t size);
++int tegra_ivc_can_read(struct ivc *ivc);
++int tegra_ivc_can_write(struct ivc *ivc);
++uint32_t tegra_ivc_tx_frames_available(struct ivc *ivc);
++int tegra_ivc_tx_empty(struct ivc *ivc);
++int tegra_ivc_read_peek(struct ivc *ivc, void *buf, size_t off, size_t count);
++void *tegra_ivc_read_get_next_frame(struct ivc *ivc);
++int tegra_ivc_read_advance(struct ivc *ivc);
++int tegra_ivc_write_poke(struct ivc *ivc, const void *buf, size_t off,
++		size_t count);
++void *tegra_ivc_write_get_next_frame(struct ivc *ivc);
++int tegra_ivc_write_advance(struct ivc *ivc);
++int tegra_ivc_channel_notified(struct ivc *ivc);
++void tegra_ivc_channel_reset(struct ivc *ivc);
++
++#ifdef CONFIG_TEGRA_HV_MANAGER
++/**
++ * tegra_hv_ivc_reserve - Reserve an IVC queue for use
++ * @dn:		Device node pointer to the queue in the DT
++ *		If NULL, then operate on first HV device
++ * @queue_id	Id number of the queue to use.
++ * @ops		Ops structure or NULL (deprecated)
++ *
++ * Reserves the queue for use
++ *
++ * Returns a pointer to the ivc_dev to use or an ERR_PTR.
++ * Note that returning EPROBE_DEFER means that the ivc driver
++ * hasn't loaded yet and you should try again later in the
++ * boot sequence.
++ *
++ * Note that @ops must be NULL for channels that handle reset.
++ */
++struct tegra_hv_ivc_cookie *tegra_hv_ivc_reserve(
++		struct device_node *dn, int id,
++		const struct tegra_hv_ivc_ops *ops);
++
++/**
++ * tegra_hv_ivc_unreserve - Unreserve an IVC queue used
++ * @ivck	IVC cookie
++ *
++ * Unreserves the IVC channel
++ *
++ * Returns 0 on success and an error code otherwise
++ */
++int tegra_hv_ivc_unreserve(struct tegra_hv_ivc_cookie *ivck);
++
++/**
++ * ivc_hv_ivc_write - Writes a frame to the IVC queue
++ * @ivck	IVC cookie of the queue
++ * @buf		Pointer to the data to write
++ * @size	Size of the data to write
++ *
++ * Write a number of bytes (as a single frame) from the queue.
++ *
++ * Returns size on success and an error code otherwise
++ */
++int tegra_hv_ivc_write(struct tegra_hv_ivc_cookie *ivck, const void *buf,
++		int size);
++
++/**
++ * ivc_hv_ivc_read - Reads a frame from the IVC queue
++ * @ivck	IVC cookie of the queue
++ * @buf		Pointer to the data to read
++ * @size	max size of the data to read
++ *
++ * Reads a number of bytes (as a single frame) from the queue.
++ *
++ * Returns size on success and an error code otherwise
++ */
++int tegra_hv_ivc_read(struct tegra_hv_ivc_cookie *ivck, void *buf, int size);
++
++/**
++ * ivc_hv_ivc_can_read - Test whether data are available
++ * @ivck	IVC cookie of the queue
++ *
++ * Test wheter data to read are available
++ *
++ * Returns 1 if data are available in the rx queue, 0 if not
++ */
++int tegra_hv_ivc_can_read(struct tegra_hv_ivc_cookie *ivck);
++
++/**
++ * ivc_hv_ivc_can_write - Test whether data can be written
++ * @ivck	IVC cookie of the queue
++ *
++ * Test wheter data can be written
++ *
++ * Returns 1 if data are can be written to the tx queue, 0 if not
++ */
++int tegra_hv_ivc_can_write(struct tegra_hv_ivc_cookie *ivck);
++
++/**
++ * tegra_ivc_tx_frames_available - gets number of free entries in tx queue
++ * @ivc/@ivck	IVC channel or cookie
++ *
++ * Returns the number of unused entries in the tx queue. Assuming the caller
++ * does not write any additional frames, this number may increase from the
++ * value returned as the receiver consumes frames.
++ *
++ */
++uint32_t tegra_hv_ivc_tx_frames_avilable(struct tegra_hv_ivc_cookie *ivck);
++
++/**
++ * ivc_hv_ivc_tx_empty - Test whether the tx queue is empty
++ * @ivck	IVC cookie of the queue
++ *
++ * Test wheter the tx queue is completely empty
++ *
++ * Returns 1 if the queue is empty, zero otherwise
++ */
++int tegra_hv_ivc_tx_empty(struct tegra_hv_ivc_cookie *ivck);
++
++/**
++ * ivc_hv_ivc_loopback - Sets (or clears) loopback mode
++ * @ivck	IVC cookie of the queue
++ * @mode	Set loopback on/off (1 = on, 0 = off)
++ *
++ * Sets or clears loopback mode accordingly.
++ *
++ * When loopback is active any writes are ignored, while
++ * reads do not return data.
++ * Incoming data are copied immediately to the tx queue.
++ *
++ * Returns 0 on success, a negative error code otherwise
++ */
++int tegra_hv_ivc_set_loopback(struct tegra_hv_ivc_cookie *ivck, int mode);
++
++/* debugging aid */
++int tegra_hv_ivc_dump(struct tegra_hv_ivc_cookie *ivck);
++
++/**
++ * ivc_hv_ivc_read_peek - Peek (copying) data from a received frame
++ * @ivck	IVC cookie of the queue
++ * @buf		Buffer to receive the data
++ * @off		Offset in the frame
++ * @count	Count of bytes to copy
++ *
++ * Peek data from a received frame, copying to buf, without removing
++ * the frame from the queue.
++ *
++ * Returns 0 on success, a negative error code otherwise
++ */
++int tegra_hv_ivc_read_peek(struct tegra_hv_ivc_cookie *ivck,
++		void *buf, int off, int count);
++
++/**
++ * ivc_hv_ivc_read_get_next_frame - Peek at the next frame to receive
++ * @ivck	IVC cookie of the queue
++ *
++ * Peek at the next frame to be received, without removing it from
++ * the queue.
++ *
++ * Returns a pointer to the frame, or an error encoded pointer.
++ */
++void *tegra_hv_ivc_read_get_next_frame(struct tegra_hv_ivc_cookie *ivck);
++
++/**
++ * ivc_hv_ivc_read_advance - Advance the read queue
++ * @ivck	IVC cookie of the queue
++ *
++ * Advance the read queue
++ *
++ * Returns 0, or a negative error value if failed.
++ */
++int tegra_hv_ivc_read_advance(struct tegra_hv_ivc_cookie *ivck);
++
++/**
++ * ivc_hv_ivc_write_poke - Poke data to a frame to be transmitted
++ * @ivck	IVC cookie of the queue
++ * @buf		Buffer to the data
++ * @off		Offset in the frame
++ * @count	Count of bytes to copy
++ *
++ * Copy data to a transmit frame, copying from buf, without advancing
++ * the the transmit queue.
++ *
++ * Returns 0 on success, a negative error code otherwise
++ */
++int tegra_hv_ivc_write_poke(struct tegra_hv_ivc_cookie *ivck,
++		const void *buf, int off, int count);
++
++/**
++ * ivc_hv_ivc_write_get_next_frame - Poke at the next frame to transmit
++ * @ivck	IVC cookie of the queue
++ *
++ * Get access to the next frame.
++ *
++ * Returns a pointer to the frame, or an error encoded pointer.
++ */
++void *tegra_hv_ivc_write_get_next_frame(struct tegra_hv_ivc_cookie *ivck);
++
++/**
++ * ivc_hv_ivc_write_advance - Advance the write queue
++ * @ivck	IVC cookie of the queue
++ *
++ * Advance the write queue
++ *
++ * Returns 0, or a negative error value if failed.
++ */
++int tegra_hv_ivc_write_advance(struct tegra_hv_ivc_cookie *ivck);
++
++/**
++ * tegra_hv_mempool_reserve_vpr - Reserve the IVM-VPR mempool if it exists
++ *
++ * Returns a cookie representing the mempool on success, otherwise an ERR_PTR.
++ */
++struct tegra_hv_ivm_cookie *tegra_hv_mempool_reserve_vpr(void);
++
++/**
++ * tegra_hv_mempool_reserve - reserve a mempool for use
++ * @id		Id of the requested mempool.
++ *
++ * Returns a cookie representing the mempool on success, otherwise an ERR_PTR.
++ */
++struct tegra_hv_ivm_cookie *tegra_hv_mempool_reserve(unsigned id);
++
++/**
++ * tegra_hv_mempool_release - release a reserved mempool
++ * @ck		Cookie returned by tegra_hv_mempool_reserve().
++ *
++ * Returns 0 on success or a negative error code otherwise.
++ */
++int tegra_hv_mempool_unreserve(struct tegra_hv_ivm_cookie *ck);
++
++/**
++ * ivc_channel_notified - handle internal messages
++ * @ivck	IVC cookie of the queue
++ *
++ * This function must be called following every notification (interrupt or
++ * callback invocation) for the tegra_hv_- version).
++ *
++ * Returns 0 if the channel is ready for communication, or -EAGAIN if a channel
++ * reset is in progress.
++ */
++int tegra_hv_ivc_channel_notified(struct tegra_hv_ivc_cookie *ivck);
++
++/**
++ * ivc_channel_reset - initiates a reset of the shared memory state
++ * @ivck	IVC cookie of the queue
++ *
++ * This function must be called after a channel is reserved before it is used
++ * for communication. The channel will be ready for use when a subsequent call
++ * to ivc_channel_notified() returns 0.
++ */
++void tegra_hv_ivc_channel_reset(struct tegra_hv_ivc_cookie *ivck);
++
++struct ivc *tegra_hv_ivc_convert_cookie(struct tegra_hv_ivc_cookie *ivck);
++#else
++static inline struct tegra_hv_ivc_cookie *tegra_hv_ivc_reserve(
++		struct device_node *dn, int id,
++		const struct tegra_hv_ivc_ops *ops)
++{
++	return ERR_PTR(-ENODEV);
++}
++
++static inline int tegra_hv_ivc_unreserve(struct tegra_hv_ivc_cookie *ivck)
++{
++	return -ENODEV;
++}
++
++static inline int tegra_hv_ivc_write(struct tegra_hv_ivc_cookie *ivck,
++		const void *buf, int size)
++{
++	return -ENODEV;
++}
++
++static inline int tegra_hv_ivc_read(struct tegra_hv_ivc_cookie *ivck,
++		void *buf, int size)
++{
++	return -ENODEV;
++}
++
++static inline int tegra_hv_ivc_can_read(struct tegra_hv_ivc_cookie *ivck)
++{
++	return 0;
++}
++
++static inline int tegra_hv_ivc_can_write(struct tegra_hv_ivc_cookie *ivck)
++{
++	return 0;
++}
++
++static inline uint32_t tegra_hv_ivc_tx_frames_avilable(
++		struct tegra_hv_ivc_cookie *ivck)
++{
++	return 0;
++}
++
++static inline int tegra_hv_ivc_tx_empty(struct tegra_hv_ivc_cookie *ivck)
++{
++	return 0;
++}
++
++static inline int tegra_hv_ivc_set_loopback(struct tegra_hv_ivc_cookie *ivck,
++		int mode)
++{
++	return -ENODEV;
++}
++
++static inline int tegra_hv_ivc_dump(struct tegra_hv_ivc_cookie *ivck)
++{
++	return -ENODEV;
++}
++
++static inline int tegra_hv_ivc_read_peek(struct tegra_hv_ivc_cookie *ivck,
++		void *buf, int off, int count)
++{
++	return -ENODEV;
++}
++
++static inline void *tegra_hv_ivc_read_get_next_frame(
++		struct tegra_hv_ivc_cookie *ivck)
++{
++	return ERR_PTR(-ENODEV);
++}
++
++static inline int tegra_hv_ivc_read_advance(struct tegra_hv_ivc_cookie *ivck)
++{
++	return -ENODEV;
++}
++
++static inline int tegra_hv_ivc_write_poke(struct tegra_hv_ivc_cookie *ivck,
++		const void *buf, int off, int count)
++{
++	return -ENODEV;
++}
++
++static inline void *tegra_hv_ivc_write_get_next_frame(
++		struct tegra_hv_ivc_cookie *ivck)
++{
++	return ERR_PTR(-ENODEV);
++}
++
++static inline int tegra_hv_ivc_write_advance(struct tegra_hv_ivc_cookie *ivck)
++{
++	return -ENODEV;
++}
++
++static inline struct tegra_hv_ivm_cookie *tegra_hv_mempool_reserve(unsigned id)
++{
++	return ERR_PTR(-ENODEV);
++}
++
++static inline int tegra_hv_mempool_unreserve(struct tegra_hv_ivm_cookie *ck)
++{
++	return -ENODEV;
++}
++
++static inline int tegra_hv_ivc_channel_notified(
++		struct tegra_hv_ivc_cookie *ivck)
++{
++	return -ENODEV;
++}
++
++static inline void tegra_hv_ivc_channel_reset(struct tegra_hv_ivc_cookie *ivck)
++{
++}
++
++static inline struct ivc *tegra_hv_ivc_convert_cookie(
++		struct tegra_hv_ivc_cookie *ivck)
++{
++	return ERR_PTR(-ENODEV);
++}
++#endif
++
++#endif
+-- 
+2.34.1
+

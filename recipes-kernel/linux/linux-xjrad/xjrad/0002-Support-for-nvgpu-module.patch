@@ -2,6 +2,7 @@ From 23a3c17cac6b5d32638b87d9464814751a9baf52 Mon Sep 17 00:00:00 2001
 From: Thomas Epperson <thomas.epperson@snapon.com>
 Date: Fri, 13 Sep 2024 12:10:10 -0500
 Subject: [PATCH] Support for nvgpu module.
+Upstream-Status: Pending
 
 ---
  drivers/dma-buf/dma-buf.c              | 49 +++++++++++++++++++++++

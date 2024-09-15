@@ -2,6 +2,7 @@ From 5ad3289cb237caf027aeca27a124c582e14cb21c Mon Sep 17 00:00:00 2001
 From: Thomas Epperson <thomas.epperson@snapon.com>
 Date: Fri, 13 Sep 2024 16:59:17 -0500
 Subject: [PATCH] Add hypervisor check code for nvgpu support.
+Upstream-Status: Pending
 
 ---
  drivers/platform/tegra/Makefile        |    5 +-

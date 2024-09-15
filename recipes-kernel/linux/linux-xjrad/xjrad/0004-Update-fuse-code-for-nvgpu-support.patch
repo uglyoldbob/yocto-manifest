@@ -2,6 +2,7 @@ From c37ea58825d38d7f21992e17ca6ecb2f0668589b Mon Sep 17 00:00:00 2001
 From: Thomas Epperson <thomas.epperson@snapon.com>
 Date: Fri, 13 Sep 2024 16:31:35 -0500
 Subject: [PATCH] Update fuse code for nvgpu support.
+Upstream-Status: Pending
 
 ---
  drivers/soc/tegra/fuse/Makefile         |   1 +

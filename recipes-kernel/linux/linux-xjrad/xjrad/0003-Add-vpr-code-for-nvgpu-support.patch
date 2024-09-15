@@ -2,6 +2,7 @@ From af5418030837ad03e43a0431f69a862a0946e3f6 Mon Sep 17 00:00:00 2001
 From: Thomas Epperson <thomas.epperson@snapon.com>
 Date: Fri, 13 Sep 2024 15:45:28 -0500
 Subject: [PATCH] Add vpr code for nvgpu support.
+Upstream-Status: Pending
 
 ---
  arch/arm64/include/asm/dma-iommu.h         |  47 +++

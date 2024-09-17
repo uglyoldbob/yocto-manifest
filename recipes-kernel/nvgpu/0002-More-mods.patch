@@ -2,6 +2,7 @@ From 560fd2aead6f0666b0aeb420971f2db2df6e0e19 Mon Sep 17 00:00:00 2001
 From: Thomas Epperson <thomas.epperson@snapon.com>
 Date: Tue, 17 Sep 2024 13:26:10 -0500
 Subject: [PATCH] More mods
+Upstream-Status: Pending
 
 ---
  include/linux/tegra_soctherm.h | 25 +++++++++++++++++++++++++

@@ -2,7 +2,7 @@
 id=ethernet-dhcp
 uuid=96b0dbcc-807c-4215-9ec5-7834efa5c628
 type=ethernet
-interface-name=eth0
+interface-name=end0
 
 [ethernet]
 

@@ -2,6 +2,7 @@ From f51a8a655a87a44f4ece34705f1ab627caecda69 Mon Sep 17 00:00:00 2001
 From: Thomas Epperson <thomas.epperson@gmail.com>
 Date: Sun, 15 Sep 2024 09:05:22 -0500
 Subject: [PATCH] Nvmap part 2
+Upstream-Status: Pending
 
 ---
  arch/arm64/include/asm/device.h          |   7 +

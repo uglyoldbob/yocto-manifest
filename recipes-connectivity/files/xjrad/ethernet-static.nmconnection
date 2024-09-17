@@ -2,7 +2,7 @@
 id=ethernet-static
 uuid=7a6af403-0017-4fb0-8c46-6c4e64c26d8b
 type=ethernet
-interface-name=eth0
+interface-name=end0
 
 [ethernet]
 

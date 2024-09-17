@@ -6,7 +6,8 @@ LIC_FILES_CHKSUM = "file://${COREBASE}/meta/files/common-licenses/MIT;md5=0835ad
 inherit module
 
 SRC_URI = "file://0001-Initial-commit-with-modified-nvgpu-code.patch \
-          "
+	file://0002-More-mods.patch \
+"
 
 S = "${WORKDIR}/sources"
 UNPACKDIR = "${S}"

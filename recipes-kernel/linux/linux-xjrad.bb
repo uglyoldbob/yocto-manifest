@@ -11,5 +11,7 @@ SRC_URI:append = " \
     file://0004-Update-fuse-code-for-nvgpu-support.patch \
     file://0005-Add-hypervisor-check-code-for-nvgpu-support.patch \
     file://0006-Nvmap.patch \
-    file://0006-Nvmap-part-2.patch \
+    file://0007-Nvmap-part-2.patch \
+    file://0008-Nvgpu-support.patch \
+    file://0009-Nvgpu-compiles-now.patch \
 "

@@ -14,4 +14,5 @@ SRC_URI:append = " \
     file://0007-Nvmap-part-2.patch \
     file://0008-Nvgpu-support.patch \
     file://0009-Nvgpu-compiles-now.patch \
+    file://0010-Move-nvgpu-into-the-kernel.patch \
 "

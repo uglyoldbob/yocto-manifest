@@ -35,14 +35,15 @@ ConditionPathExists=/dev/tty0
 Type=notify
 EnvironmentFile=/etc/default/weston
 ExecStart=/usr/bin/weston --log=/home/weston/weston.log --modules=systemd-notify.so
+#ExecStart=strace -e trace=file -o /home/weston/strace.log /usr/bin/weston --log=/home/weston/weston.log --modules=systemd-notify.so
 
 # Optional watchdog setup
 #TimeoutStartSec=60
 #WatchdogSec=20
 
 # The user to run Weston as.
-User=weston
-Group=weston
+User=root
+Group=root
 
 # Make sure the working directory is the users home directory
 WorkingDirectory=/home/weston

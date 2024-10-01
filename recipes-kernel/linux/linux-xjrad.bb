@@ -15,4 +15,6 @@ SRC_URI:append = " \
     file://0008-Nvgpu-support.patch \
     file://0009-Nvgpu-compiles-now.patch \
     file://0010-Move-nvgpu-into-the-kernel.patch \
+    file://0011-Modify-device-tree.patch \
+    file://0012-Nvgpu-progress.patch \
 "

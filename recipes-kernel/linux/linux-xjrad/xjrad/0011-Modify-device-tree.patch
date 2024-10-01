@@ -1,0 +1,50 @@
+From deb291d5559408c436ddf3125399366bc32caf52 Mon Sep 17 00:00:00 2001
+From: Thomas Epperson <thomas.epperson@snapon.com>
+Date: Mon, 23 Sep 2024 15:47:20 -0500
+Subject: [PATCH 1/2] Modify device tree.
+Upstream-Status: Pending
+
+---
+ arch/arm64/boot/dts/uglyoldbob/xjrad.dts | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/uglyoldbob/xjrad.dts b/arch/arm64/boot/dts/uglyoldbob/xjrad.dts
+index 1184dc5736ca..38402beb2535 100644
+--- a/arch/arm64/boot/dts/uglyoldbob/xjrad.dts
++++ b/arch/arm64/boot/dts/uglyoldbob/xjrad.dts
+@@ -118,6 +118,10 @@ i2c@546c0000 {
+ 			status = "okay";
+ 		};
+ 	};
++	
++	uarta {
++		status = "okay";
++	};
+ 
+ 	gpu@57000000 {
+ 		vdd-supply = <&vdd_gpu>;
+@@ -585,6 +589,10 @@ mmc@700b0000 {
+ 		vqmmc-supply = <&vddio_sdmmc>;
+ 		vmmc-supply = <&vdd_3v3_sd>;
+ 	};
++	
++	mmc@700b0200 {
++		status = "okay";
++	};
+ 
+ 	mmc@700b0400 {
+ 		status = "okay";
+@@ -598,6 +606,10 @@ mmc@700b0400 {
+ 		keep-power-in-suspend;
+ 		wakeup-source;
+ 	};
++	
++	mmc@700b0600 {
++		status = "okay";
++	};
+ 
+ 	usb@700d0000 {
+ 		status = "okay";
+-- 
+2.43.0
+

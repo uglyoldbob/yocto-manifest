@@ -1,6 +1,7 @@
 From 17c8e043117946f3c23423da5da71d5b8d5c2fe3 Mon Sep 17 00:00:00 2001
 From: Thomas Epperson <thomas.epperson@snapon.com>
 Date: Wed, 11 Sep 2024 08:32:41 -0500
+Upstream-Status: Pending
 Subject: [PATCH] Add device tree for custom hardware based on jetson nano b01
  board.
 

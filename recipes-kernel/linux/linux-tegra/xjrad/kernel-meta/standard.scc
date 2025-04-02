@@ -1,0 +1,6 @@
+define KMACHINE xjrad
+define KTYPE standard
+
+include ktypes/standard
+
+kconf hardware xjrad.cfg

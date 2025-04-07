@@ -3,7 +3,8 @@ SECTION = "base"
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COREBASE}/meta/files/common-licenses/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
-inherit cargo-update-recipe-crates cargo pkgconfig
+inherit cargo pkgconfig
+#inherit cargo-update-recipe-crates
 
 DEPENDS = "libdbus-c++"
 
@@ -35,7 +36,7 @@ python egui_fix() {
         return
 
     patches = dict()
-    workdir = d.getVar('UNPACKDIR')
+    workdir = d.getVar('WORKDIR')
     with open(cargo_config, "a+") as config:
         print('\n[patch."https://github.com/emilk/egui.git"]', file=config)
         print('egui = { path = "%s"}' % (os.path.join(workdir, "egui/crates/egui")), file=config)

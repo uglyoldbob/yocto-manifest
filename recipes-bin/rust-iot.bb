@@ -4,7 +4,8 @@ LICENSE = "MIT"
 
 LIC_FILES_CHKSUM = "file://../LICENSE;md5=d41d8cd98f00b204e9800998ecf8427e"
 
-inherit cargo-update-recipe-crates cargo pkgconfig
+inherit cargo pkgconfig
+#inherit cargo-update-recipe-crates
 
 #pull in generated crate info
 require ${BPN}-crates.inc

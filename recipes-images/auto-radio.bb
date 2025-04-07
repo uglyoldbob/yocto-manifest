@@ -37,7 +37,6 @@ IMAGE_INSTALL += " \
 	swupdate-www \
 	openssh \
 	libgpiod libgpiod-tools libgpiod-dev \
-	radio-gui \
 	alsa-utils \
 	espeak \
 	nano \

@@ -1,12 +1,14 @@
 **Initialize the yocto sources**
+```
 repo init -u https://github.com/uglyoldbob/yocto-manifest.git -m whatever.xml -b master
 repo sync
+```
 
 **Obtain or create keys**
 
 Obtain or create keys for encrypting swu update files.
 
-**Creating keys**
+***Creating keys***
 
 In the build directory of your yocto setup, run this sequence of commands.
 ```
@@ -18,7 +20,7 @@ echo key=$(openssl rand -hex 64) > ./conf/keys.conf
 echo iv =$(openssl rand -hex 32) >> ./conf/keys.conf
 ```
 
-**Obtaining keys**
+***Obtaining keys***
 
 Obtain the public key, private key, and pass file used for signing swu images. 
 

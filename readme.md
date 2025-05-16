@@ -40,3 +40,7 @@ echo SWUPDATE_PASSWORD_FILE=\"$(pwd)/conf/signing/pass\" >> ./conf/local.conf
 echo SWUPDATE_AES_FILE = \"$(pwd)/conf/keys.conf\" >> ./conf/local.conf
 echo SWUPDATE_PRIVATE_KEY = \"$(pwd)/conf/signing/priv.pem\" >> ./conf/local.conf
 ```
+
+# Workarounds
+
+For ubuntu, `sudo apparmor_parser -R /etc/apparmor.d/unprivileged_userns` works around an issue with operation not permitted with `/proc/self/uid_map`

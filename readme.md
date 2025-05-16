@@ -16,8 +16,8 @@ mkdir ./conf/signing
 dd if=/dev/urandom bs=16 count=1 | base64 > ./conf/signing/pass
 openssl genrsa -aes256 -out ./conf/signing/priv.pem -passout file:./conf/signing/pass
 openssl rsa -in ./conf/signing/priv.pem -out ./conf/signing/public.pem -outform PEM -pubout -passin file:./conf/signing/pass
-echo key=$(openssl rand -hex 64) > ./conf/keys.conf
-echo iv =$(openssl rand -hex 32) >> ./conf/keys.conf
+echo key=$(openssl rand -hex 32) > ./conf/keys.conf
+echo iv =$(openssl rand -hex 16) >> ./conf/keys.conf
 ```
 
 ***Obtaining keys***
